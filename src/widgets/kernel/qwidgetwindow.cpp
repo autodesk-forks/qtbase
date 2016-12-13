@@ -661,6 +661,30 @@ bool QWidgetWindow::updatePos()
     bool changed = false;
     if (m_widget->testAttribute(Qt::WA_OutsideWSRange))
         return changed;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Addition:  Since we have a lot of legacy code that rely
+    // on a fixed HWND parent hierarchy, we sometimes are forced to use a mixed
+    // native / non-native QWidget parent chain. In these cases the QWindow and
+    // the QWidget positions may not always match - depending on the in-between
+    // non-native parent chain - like in scroll-areas, e.g.
+    //-------------------------------------------------------------------------
+    if ( m_widget->testAttribute( Qt::WA_NativeWindow ) )
+    {
+        QWidget* np = m_widget->nativeParentWidget();
+        QWidget* p = m_widget->parentWidget();
+        if ( np && p && ( np != p ) )
+        {
+            QPoint top_left_calculated = p->mapTo( np, m_widget->data->crect.topLeft() );
+            if( top_left_calculated != geometry().topLeft())
+            {
+                changed = true;
+                m_widget->data->crect.moveTopLeft( np->mapTo( p, geometry().topLeft() ) );
+            }
+            updateMargins();
+            return changed;
+        }
+    }
+    //-------------------------------------------------------------------------
     if (m_widget->data->crect.topLeft() != geometry().topLeft()) {
         changed = true;
         m_widget->data->crect.moveTopLeft(geometry().topLeft());

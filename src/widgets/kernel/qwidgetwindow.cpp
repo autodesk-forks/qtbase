@@ -675,10 +675,11 @@ bool QWidgetWindow::updatePos()
         if ( np && p && ( np != p ) )
         {
             QPoint top_left_calculated = p->mapTo( np, m_widget->data->crect.topLeft() );
-            if( top_left_calculated != geometry().topLeft())
+            QPoint top_left = geometry().topLeft();
+            if( top_left_calculated != top_left )
             {
                 changed = true;
-                m_widget->data->crect.moveTopLeft( np->mapTo( p, geometry().topLeft() ) );
+                //m_widget->data->crect.moveTopLeft( p->mapFrom( np, geometry().topLeft() ) );
             }
             updateMargins();
             return changed;

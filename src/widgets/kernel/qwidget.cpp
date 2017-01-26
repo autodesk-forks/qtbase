@@ -4256,6 +4256,7 @@ QPoint QWidget::mapTo(const QWidget * parent, const QPoint & pos) const
         while (w != parent) {
             Q_ASSERT_X(w, "QWidget::mapTo(const QWidget *parent, const QPoint &pos)",
                        "parent must be in parent hierarchy");
+            if( !w ){ break; }
             p = w->mapToParent(p);
             w = w->parentWidget();
         }
@@ -4280,7 +4281,7 @@ QPoint QWidget::mapFrom(const QWidget * parent, const QPoint & pos) const
         while (w != parent) {
             Q_ASSERT_X(w, "QWidget::mapFrom(const QWidget *parent, const QPoint &pos)",
                        "parent must be in parent hierarchy");
-
+            if( !w ){ break; }
             p = w->mapFromParent(p);
             w = w->parentWidget();
         }

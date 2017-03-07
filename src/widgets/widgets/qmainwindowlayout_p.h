@@ -220,9 +220,14 @@ public:
 #ifndef QT_NO_DOCKWIDGET
     void setCorner(Qt::Corner corner, Qt::DockWidgetArea area);
     Qt::DockWidgetArea corner(Qt::Corner corner) const;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+    // makes it possible to add a dock widget to the front of the dock area 
+    // container so that the widget can appear close to the main windows center area.
+    //-------------------------------------------------------------------------
     void addDockWidget(Qt::DockWidgetArea area,
                        QDockWidget *dockwidget,
-                       Qt::Orientation orientation);
+                       Qt::Orientation orientation, bool toFront = false);
     void splitDockWidget(QDockWidget *after,
                          QDockWidget *dockwidget,
                          Qt::Orientation orientation);

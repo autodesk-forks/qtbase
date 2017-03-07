@@ -1141,6 +1141,26 @@ void QMainWindow::addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget
     d_func()->layout->addDockWidget(area, dockwidget, orientation);
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+/*!
+    Adds \a dockwidget into the given \a area in the direction
+    specified by the \a orientation.
+    By setting \a toFront to true, the \a dockwidget is placed at the front
+    of the docking area container instead of appending it to the end, which
+    corresponds to the default behavior.
+*/
+//-------------------------------------------------------------------------
+void QMainWindow::addDockWidget( Qt::DockWidgetArea area, QDockWidget *dockwidget,
+    Qt::Orientation orientation, bool toFront )
+{
+    if ( !checkDockWidgetArea( area, "QMainWindow::addDockWidget" ) )
+        return;
+
+    d_func()->layout->addDockWidget( area, dockwidget, orientation, toFront );
+}
+
+
 /*!
     \fn void QMainWindow::splitDockWidget(QDockWidget *first, QDockWidget *second, Qt::Orientation orientation)
 

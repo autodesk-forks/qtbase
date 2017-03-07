@@ -264,7 +264,12 @@ public:
     QSize sizeHint() const;
     QSize minimumSize() const;
 
-    void addDockWidget(QInternal::DockPosition pos, QDockWidget *dockWidget, Qt::Orientation orientation);
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+    // makes it possible to add a dock widget to the front of the dock area 
+    // container so that the widget can appear close to the main windows center area.
+    //-------------------------------------------------------------------------
+    void addDockWidget(QInternal::DockPosition pos, QDockWidget *dockWidget, Qt::Orientation orientation, bool toFront);
     bool restoreDockWidget(QDockWidget *dockWidget);
     void splitDockWidget(QDockWidget *after, QDockWidget *dockWidget,
                          Qt::Orientation orientation);

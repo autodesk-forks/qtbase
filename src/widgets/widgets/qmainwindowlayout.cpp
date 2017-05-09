@@ -1725,7 +1725,70 @@ bool QMainWindowLayout::separatorMove(const QPoint &pos)
 {
     if (movingSeparator.isEmpty())
         return false;
+
     movingSeparatorPos = pos;
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Extended docking resize behavior
+    // A drag move separator will now just do a single sided resizing of one 
+    // layout item and keep the size of the layout item on the other side of 
+    // the separator. The space that it needs for growing/shrinking will be 
+    // taken from the center docking area.
+    //
+    // A shift+drag move separator will do the common Qt two sided resizing
+    // where on both sides of the separator one item will grow and the other
+    // one shrink. When the dragging is done in direction of the center docking
+    // area and all items in that direction has been already shrunk to their
+    // minimum size, then dragging doesn't get stuck as used to be, instead it 
+    // will continue and move the shrunken items into the center docking area.
+    //-------------------------------------------------------------------------
+    auto prop = layoutState.mainWindow->property( "_3dsmax_disable_extended_docking_resize" );
+    if ( !prop.isValid() || prop.toBool() == false )
+    {
+        if ( movingSeparator.count() > 1 )
+        {
+            int firstIndex = movingSeparator.first();
+            Qt::Orientation o = firstIndex == QInternal::LeftDock || firstIndex == QInternal::RightDock
+                ? Qt::Horizontal
+                : Qt::Vertical;
+
+            QDockAreaLayoutInfo* info = layoutState.dockAreaLayout.info( movingSeparator );
+
+            // Extended resizing only if the affected layout info shares the same orientation 
+            // as the master dock area.
+            if ( info && info->o == o )
+            {
+                // If the shift state changes, we start with a new 'fresh' move again, cause shift 
+                // toggling between single-/two-sided separator resize during the move won't work.
+                Qt::KeyboardModifiers keyMods = QGuiApplication::queryKeyboardModifiers();
+                if ( (keyMods == Qt::ShiftModifier) != shiftMoveSeparator )
+                {
+                    shiftMoveSeparator = !shiftMoveSeparator;
+
+                    // As move origin update we take the moved separators center.
+                    QPoint sepCenter = layoutState.dockAreaLayout.separatorRect( movingSeparator ).center();
+
+                    if ( o == Qt::Horizontal )
+                    {
+                        movingSeparatorOrigin = QPoint( sepCenter.x(), movingSeparatorOrigin.y() );
+                    }
+                    else
+                    {
+                        movingSeparatorOrigin = QPoint( movingSeparatorOrigin.x(), sepCenter.y() );
+                    }
+
+                    // Update the saved layout state, from which the separator move calculation 
+                    // starts on the timer event, to the current layoutState. This will be our new
+                    // starting point for the calculation.
+                    savedState.clear();
+                    savedState = layoutState;
+                }
+            }
+        }
+    }
+    //-------------------------------------------------------------------------
+    
+
     separatorMoveTimer.start(0, this);
     return true;
 }
@@ -1736,6 +1799,7 @@ bool QMainWindowLayout::endSeparatorMove(const QPoint&)
         return false;
     movingSeparator.clear();
     savedState.clear();
+    shiftMoveSeparator = false;
     return true;
 }
 

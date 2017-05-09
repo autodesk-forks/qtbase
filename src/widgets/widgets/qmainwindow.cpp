@@ -1454,7 +1454,10 @@ bool QMainWindow::event(QEvent *event)
             d->adjustCursor(QPoint(0, 0));
             return true;
         case QEvent::ShortcutOverride: // when a menu pops up
-            d->adjustCursor(QPoint(0, 0));
+            if ( d->layout->movingSeparator.isEmpty() ) // Don't revert the cursor if we move a separator and a key is pressed.
+            {
+                d->adjustCursor( QPoint( 0, 0 ) );
+            }
             break;
 #endif // QT_NO_CURSOR
 

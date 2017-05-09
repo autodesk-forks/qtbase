@@ -271,6 +271,7 @@ public:
     QList<int> movingSeparator;
     QPoint movingSeparatorOrigin, movingSeparatorPos;
     QBasicTimer separatorMoveTimer;
+    bool shiftMoveSeparator = false; // Autodesk 3ds Max addition: Separator moved while shift pressed
 
     bool startSeparatorMove(const QPoint &pos);
     bool separatorMove(const QPoint &pos);

@@ -152,6 +152,43 @@ QSize QDockAreaLayoutItem::maximumSize() const
     return QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
 }
 
+namespace
+{
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns if the extended docking resize behavior is enabled
+// for a main window or not.
+//-------------------------------------------------------------------------
+bool doExtendedDockWidgetResize( QMainWindow* mainWindow )
+{
+    if ( mainWindow )
+    {
+        auto prop = mainWindow->property( "_3dsmax_disable_extended_docking_resize" );
+        return (!prop.isValid() || prop.toBool() == false);
+    }
+    return false;
+}
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method wraps the layout items default implementation of hasFixedSize().
+// For 3dsmax it will always return false for the items fixed size.
+// The default implementation is blocking the UI when a widget has a fixed
+// size constraint for the width or height. Also there is no separator added
+// although the widget could be resized on one side.
+//-------------------------------------------------------------------------
+bool hasLayoutItemFixedSize( QMainWindow* mainWindow, const QDockAreaLayoutItem& item, Qt::Orientation o )
+{
+    // extended 3dsmax dock widget resize behavior
+    if ( doExtendedDockWidgetResize( mainWindow ) )
+    {
+        return false;
+    }
+
+    return item.hasFixedSize( o );
+}
+}
+
 bool QDockAreaLayoutItem::hasFixedSize(Qt::Orientation o) const
 {
     return perp(o, minimumSize()) == perp(o, maximumSize());
@@ -413,7 +450,7 @@ QSize QDockAreaLayoutInfo::sizeHint() const
 #endif
         {
             if (previous && !gap && !(previous->flags &  QDockAreaLayoutItem::GapItem)
-                && !previous->hasFixedSize(o)) {
+                && !hasLayoutItemFixedSize( mainWindow, *previous, o )) {
                 a += *sep;
             }
             a += gap ? item.size : pick(o, size_hint);
@@ -554,7 +591,7 @@ void QDockAreaLayoutInfo::fitItems()
             if (!(previous->flags & QDockAreaLayoutItem::GapItem)) {
                 QLayoutStruct &ls = layout_struct_list[j++];
                 ls.init();
-                ls.minimumSize = ls.maximumSize = ls.sizeHint = previous->hasFixedSize(o) ? 0 : *sep;
+                ls.minimumSize = ls.maximumSize = ls.sizeHint = hasLayoutItemFixedSize( mainWindow, *previous, o ) ? 0 : *sep;
                 ls.empty = false;
             }
         }
@@ -625,8 +662,8 @@ void QDockAreaLayoutInfo::fitItems()
             {
                 QLayoutStruct* ls = &layout_struct_list[i];
 
-                // only allow the first expansive item to auto resize
-                if ( !firstExpansiveItemFound && ls->expansive )
+                // only allow the first expansive item, with no fixed size, to auto resize
+                if ( !firstExpansiveItemFound && ls->expansive && (ls->minimumSize != ls->maximumSize) )
                 {
                     firstExpansiveItemFound = true;
                 }
@@ -982,6 +1019,115 @@ static int separatorMoveHelper(QVector<QLayoutStruct> &list, int index, int delt
 
 namespace
 {
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// Small helper function that calculates the amount of what a dock layout
+// container changes for a given shrink delta on one separator side,
+// the grow delta on the other side and the resize direction 'deltaSign',
+// with a value of the either -1 or 1.
+//-------------------------------------------------------------------------
+int calcDeltaContainerChanged( int deltaShrink, int deltaGrow, int deltaSign )
+{
+    int deltaContainerChanged = 0;
+    if ( deltaGrow != deltaShrink )
+    {
+        if ( deltaShrink == 0 )
+            deltaContainerChanged = deltaSign * deltaGrow;
+        else if ( deltaGrow == 0 )
+            deltaContainerChanged = deltaSign * deltaShrink;
+        else if ( deltaGrow > deltaShrink )
+            deltaContainerChanged = deltaSign * (deltaGrow - deltaShrink);
+        else
+            deltaContainerChanged = deltaSign * (deltaShrink - deltaGrow);
+    }
+    return deltaContainerChanged;
+}
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method works similar to the default layout implementation of 
+// separatorMoveHelper(). The difference is, that it grows and shrinks
+// the layout items on both sides without taking in account the size limits
+// of the opposite side.
+// With the default Qt algorithm it would block in some cases, when size
+// constraint items are involved, the resizing.
+//-------------------------------------------------------------------------
+int separatorMoveHelperTwoSided( QVector<QLayoutStruct> &list, int index, int delta, int sep,
+    SeparatorMoveInfo& smi )
+{
+    // adjust sizes
+    int pos = -1;
+    for ( int i = 0; i < list.size(); ++i ) {
+        const QLayoutStruct &ls = list.at( i );
+        if ( !ls.empty ) {
+            pos = ls.pos;
+            break;
+        }
+    }
+    if ( pos == -1 )
+        return 0;
+
+    int deltaSign = (delta > 0) ? 1 : -1;
+    int deltaShrink = 0;
+    int deltaGrow = 0;
+    int deltaReturn = 0;
+
+
+    if ( delta > 0 ) {
+
+        int d = 0;
+        for ( int i = index + 1; d < delta && i < list.count(); ++i )
+            d += shrink( list[i], delta - d );
+        deltaShrink = d;
+
+        d = 0;
+        for ( int i = index; d < delta && i >= 0; --i )
+            d += grow( list[i], delta - d );
+        deltaGrow = d;
+
+        deltaReturn = d;
+
+    }
+    else if ( delta < 0 ) {
+
+        int d = 0;
+        for ( int i = index; d < -delta && i >= 0; --i )
+            d += shrink( list[i], -delta - d );
+        deltaShrink = d;
+
+        d = 0;
+        for ( int i = index + 1; d < -delta && i < list.count(); ++i )
+            d += grow( list[i], -delta - d );
+        deltaGrow = d;
+
+        deltaReturn = -d;
+    }
+
+    // set the return values
+    smi.deltaContainerChangedReturn = calcDeltaContainerChanged( deltaShrink, deltaGrow, deltaSign );
+    smi.containerShrinkedReturn = deltaShrink > deltaGrow;
+    // max delta that has been processed
+    int deltaUsed = deltaSign * qMax( deltaShrink, deltaGrow );
+    smi.deltaNotMovedReturn = (delta - deltaUsed);
+
+
+    // adjust positions
+    bool first = true;
+    for ( int i = 0; i < list.size(); ++i ) {
+        QLayoutStruct &ls = list[i];
+        if ( ls.empty ) {
+            ls.pos = pos + (first ? 0 : sep);
+            continue;
+        }
+        if ( !first )
+            pos += sep;
+        ls.pos = pos;
+        pos += ls.size;
+        first = false;
+    }
+
+    return deltaReturn;
+}
 
 //-------------------------------------------------------------------------
 // Autodesk 3ds Max addition: Extended docking resize behavior
@@ -1004,15 +1150,15 @@ namespace
 // will continue and move the shrunken items into the center docking area.
 //-------------------------------------------------------------------------
 int separatorMoveHelperSingleSided( QVector<QLayoutStruct> &list, int index, int delta, int sep, 
-    QInternal::DockPosition dockPos, SeparatorMoveInfo* smi )
+    QInternal::DockPosition dockPos, SeparatorMoveInfo& smi )
 {
     if ( delta == 0 )
     {
         return 0;
     }
 
-    bool isCenterSeparatorMove  = smi ? smi->isCenterSeparatorMove : false;
-    bool doGrow                 = smi ? smi->doGrow : false;
+    bool isCenterSeparatorMove  = smi.isCenterSeparatorMove;
+    bool doGrow                 = smi.doGrow;
 
     // adjust sizes
     int pos = -1;
@@ -1161,7 +1307,7 @@ int QDockAreaLayoutInfo::separatorMove(int index, int delta, SeparatorMoveInfo* 
         if (item.skip()) {
             ls.empty = true;
         } else {
-            const int separatorSpace = item.hasFixedSize(o) ? 0 : *sep;
+            const int separatorSpace = hasLayoutItemFixedSize( mainWindow, item, o ) ? 0 : *sep;
             ls.empty = false;
             ls.pos = item.pos;
             ls.size = item.size + separatorSpace;
@@ -1174,11 +1320,18 @@ int QDockAreaLayoutInfo::separatorMove(int index, int delta, SeparatorMoveInfo* 
     //the separator space has been added to the size, so we pass 0 as a parameter
     if ( smi )
     {
-        delta = separatorMoveHelperSingleSided(list, index, delta, 0, dockPos, smi );
+        if ( smi->doTwoSidedMove )
+        {
+            delta = separatorMoveHelperTwoSided( list, index, delta, 0, *smi );
+        }
+        else
+        {
+            delta = separatorMoveHelperSingleSided( list, index, delta, 0, dockPos, *smi );
+        }
     }
     else
     {
-        delta = separatorMoveHelper(list, index, delta, 0 /*separator*/);
+        delta = separatorMoveHelper( list, index, delta, 0 /*separator*/ );
     }
 
     // apply layout data
@@ -1187,7 +1340,7 @@ int QDockAreaLayoutInfo::separatorMove(int index, int delta, SeparatorMoveInfo* 
         if (item.skip())
             continue;
         QLayoutStruct &ls = list[i];
-        const int separatorSpace = item.hasFixedSize(o) ? 0 : *sep;
+        const int separatorSpace = hasLayoutItemFixedSize( mainWindow, item, o ) ? 0 : *sep;
         item.size = ls.size - separatorSpace;
         item.pos = ls.pos;
         if (item.subinfo != 0) {
@@ -1653,7 +1806,7 @@ QList<int> QDockAreaLayoutInfo::findSeparator(const QPoint &_pos) const
         if (!sepRect.isNull() && *sep == 1)
             sepRect.adjust(-2, -2, 2, 2);
         //we also make sure we don't find a separator that's not there
-        if (sepRect.contains(_pos) && !item.hasFixedSize(o)) {
+        if (sepRect.contains(_pos) && !hasLayoutItemFixedSize( mainWindow, item, o ) ) {
             return QList<int>() << i;
         }
 
@@ -1878,7 +2031,7 @@ void QDockAreaLayoutInfo::paintSeparators(QPainter *p, QWidget *widget,
         if (next == -1)
             break;
         QRect r = separatorRect(i);
-        if (clip.contains(r) && !item.hasFixedSize(o))
+        if (clip.contains(r) && !hasLayoutItemFixedSize( mainWindow, item, o ) )
             paintSep(p, widget, r, o, r.contains(mouse));
     }
 }
@@ -3550,6 +3703,65 @@ QList<int> findClosestInnerSeparator( QDockAreaLayoutInfo* info, Qt::Orientation
     return QList<int>();
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns the index of the next valid layout item in front 
+// of the specified index or -1 if nothing valid is there.
+//-------------------------------------------------------------------------
+int nextLayoutItemIndexInFront( QDockAreaLayoutInfo* info, int index )
+{
+    if ( info )
+    {
+        do
+        {
+            index -= 1;
+            if ( index >= 0 )
+            {
+                // is next item in front of us valid?
+                if ( !info->item_list[index].skip() )
+                    return index;
+            }
+            else // no item ahead
+            {
+                return -1;
+            }
+
+        } while ( index >= 0 );
+    }
+
+    return -1;
+}
+
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns the index of the next valid layout item behind
+// the specified index or -1 if nothing valid is there.
+//-------------------------------------------------------------------------
+int nextLayoutItemIndexBehind( QDockAreaLayoutInfo* info, int index )
+{
+    if ( info )
+    {
+        do
+        {
+            index += 1;
+            if ( index < info->item_list.count() )
+            {
+                // is next item behind us valid?
+                if ( !info->item_list[index].skip() )
+                    return index;
+            }
+            else // no item behind
+            {
+                return -1;
+            }
+
+        } while ( index < info->item_list.count() );
+    }
+
+    return -1;
+}
+
 
 //-------------------------------------------------------------------------
 // Autodesk 3ds Max addition: Extended docking resize behavior
@@ -3662,18 +3874,9 @@ int separatorMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaO
             // of the indexed item in this container.
             if ( deltaNotMovedNestedChild != 0 )
             {
-                if ( (deltaNotMovedNestedChild < 0) && (info->dockPos == QInternal::LeftDock || info->dockPos == QInternal::TopDock) )
+                if ( info->dockPos == QInternal::LeftDock || info->dockPos == QInternal::TopDock )
                 {
-                    do
-                    {
-                        index -= 1;
-                        if ( index >= 0 )
-                        {
-                            // is next item in front of us valid?
-                            if ( !info->item_list[index].skip() )
-                                break;
-                        }
-                    } while ( index >= 0 );
+                    index = nextLayoutItemIndexInFront( info, index );
                 }
 
                 if ( index >= 0 && index < info->item_list.count() )
@@ -3686,6 +3889,10 @@ int separatorMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaO
                     deltaNotMovedReturn += (deltaNotMovedNestedChild - deltaMoved);
                     returnDelta += deltaMoved;
                 }
+                else
+                {
+                    deltaNotMovedReturn = deltaNotMovedNestedChild; // pass up to parent
+                }
             }
         }
         else // skip container with opposite orientation
@@ -3697,6 +3904,443 @@ int separatorMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaO
     return returnDelta;
 }
 
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns the limit to what the layout items ahead the
+// specified index can be shrunk. The definition of 'ahead' depends on
+// the resize direction. So e.g. a resize to the right returns the shrink 
+// limit of the items on the right side of the specified indexed item.
+// This method is used for determining the limits on the main grid.
+//-------------------------------------------------------------------------
+int calcShrinkLimitAhead( QDockAreaLayout* layout, int firstIndex, int delta )
+{
+    if ( !layout )
+    {
+        return 0;
+    }
+
+    // get the main grids layout structs
+    QVector<QLayoutStruct> list;
+    if ( firstIndex == QInternal::LeftDock || firstIndex == QInternal::RightDock )
+        layout->getGrid( 0, &list );
+    else
+        layout->getGrid( &list, 0 );
+
+
+    int shrinkLimit = 0;
+    int index = 1; // start in the middle of the 3 areas
+
+    if ( delta > 0 )
+    {
+        for ( int i = index; i < list.count(); ++i )
+        {
+            if ( list[i].empty )
+            {
+                continue;
+            }
+            shrinkLimit += (list[i].size - list[i].minimumSize);
+        }
+    }
+    else if ( delta < 0 )
+    {
+        for ( int i = index; i >= 0; --i )
+        {
+            if ( list[i].empty )
+            {
+                continue;
+            }
+
+            shrinkLimit += (list[i].size - list[i].minimumSize);
+        }
+    }
+
+    return shrinkLimit;
+}
+
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns the limit to what the layout items ahead the
+// specified index can be shrunk. The definition of 'ahead' depends on
+// the resize direction. So e.g. a resize to the right returns the shrink 
+// limit of the items on the right side of the specified indexed item.
+//-------------------------------------------------------------------------
+int calcShrinkLimitAhead( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaOrientation, int index, int delta, bool includeSeparatorIndex = false )
+{
+    if ( !info )
+    {
+        return 0;
+    }
+
+    int shrinkLimit = 0;
+    if ( delta > 0 )
+    {
+        for ( int i = index + 1; i < info->item_list.count(); ++i )
+        {
+            if ( info->item_list[i].skip() )
+            {
+                continue;
+            }
+            int min = pick( dockAreaOrientation, info->item_list[i].minimumSize() );
+            shrinkLimit += (info->item_list[i].size - min);
+        }
+    }
+    else if ( delta < 0 )
+    {
+        for ( int i = index; i >= 0; --i )
+        {
+            if ( info->item_list[i].skip() || 
+                (!includeSeparatorIndex && i == index && info->item_list[i].subinfo) )
+            {
+                continue;
+            }
+
+            int min = pick( dockAreaOrientation, info->item_list[i].minimumSize() );
+            shrinkLimit += (info->item_list[i].size - min);
+        }
+    }
+
+    return shrinkLimit;
+}
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method returns the limit to what extent the layout items behind the
+// specified index can grow. The definition of 'behind' depends on
+// the resize direction. So e.g. a resize to the right returns the grow 
+// limit of the items on the left side of the specified indexed item.
+//-------------------------------------------------------------------------
+int calcGrowLimitBehind( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaOrientation, int index, int delta, bool includeSeparatorIndex = false )
+{
+    if ( !info )
+    {
+        return 0;
+    }
+
+    int growLimit = 0;
+    if ( delta > 0 )
+    {
+        for ( int i = index; i >= 0; --i )
+        {
+            if ( info->item_list[i].skip() ||
+                (!includeSeparatorIndex && i == index && info->item_list[i].subinfo) )
+            {
+                continue;
+            }
+
+            int max = pick( dockAreaOrientation, info->item_list[i].maximumSize() );
+            growLimit += (max - info->item_list[i].size);
+        }
+    }
+    else if ( delta < 0 )
+    {
+        for ( int i = index + 1; i < info->item_list.count(); ++i )
+        {
+            if ( info->item_list[i].skip() )
+            {
+                continue;
+            }
+            int max = pick( dockAreaOrientation, info->item_list[i].maximumSize() );
+            growLimit += (max - info->item_list[i].size);
+        }
+    }
+
+    return growLimit;
+}
+
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method is helper that gets called by separatorShiftMoveRecursive().
+// It is used for the resizing of the nested dock layout container, when 
+// separatorShiftMoveRecursive() steps out of recursion. The resize logic 
+// is applied to every level of the separator index path, except the 
+// the innermost one where the logic of doInnermostContainerResize() is used.
+// When separatorShiftMoveRecursive() steps out of recursion, this method
+// first resizes the container at the current index path, depending if the
+// innermost resize has changed its container size, and then layout items
+// ahead & behind the indexed container depending on what's left over from
+// the last recursion step plus the amount of the container change.
+// The method also does a pre-calculation step for determining if a
+// resulting dock layout container change would violate any size 
+// constraints and adapts the applied delta.
+//-------------------------------------------------------------------------
+void doNestedContainerResize( QDockAreaLayoutInfo* info, int index, int recDelta,
+    int deltaNotMovedNestedChild,
+    bool childContainerShrinked,
+    Qt::Orientation dockAreaOrientation,
+    int shrinkLimitParent,
+    int growLimitParent,
+    bool& containerShrinkedReturn,
+    int& deltaContainerChangedReturn,
+    int& deltaNotMovedReturn )
+{
+    if ( !info )
+    {
+        return;
+    }
+
+    // determine resize direction
+    int dir = (recDelta < 0) ? -1 : 1;
+    if ( recDelta == 0 )
+    {
+        dir = (deltaNotMovedNestedChild < 0) ? -1 : 1;
+    }
+
+    // First we do a single sided grow/shrink on the actual index of the current path step.
+    SeparatorMoveInfo smi;
+    smi.isCenterSeparatorMove = true; // don't do the index+1 thing in separatorMove()
+    smi.doGrow = !childContainerShrinked;
+
+    // We don't need to do a constraint check for the index where we step out of recursion,
+    // cause the inner resize has already checked the constraints.
+    int deltaMoved = info->separatorMove( index, recDelta, &smi, false );
+    int deltaMovedAbs = qAbs( deltaMoved );
+
+    // Do a pre-calculation step if we hit any parent size constraints
+    // when we would apply whats left over from the inner resizing.
+    deltaNotMovedReturn = deltaNotMovedNestedChild;
+    {
+        int d = deltaNotMovedNestedChild;
+        int ds = d;
+        int dg = d;
+
+        // Add the delta that the indexed container shrunk or grew to the move delta
+        // of layout items ahead or behind it.
+        if ( childContainerShrinked )
+        {
+            dg += deltaMoved;
+        }
+        else
+        {
+            ds += deltaMoved;
+        }
+
+        // Move what is locally possible
+        // What are the size limits of the items around the indexed container item?
+        int shrinkLimit = calcShrinkLimitAhead( info, dockAreaOrientation, index, dir );
+        int growLimit = calcGrowLimitBehind( info, dockAreaOrientation, index, dir );
+        // Do shrink and grow of what's locally allowed
+        int dShrink = qMin( shrinkLimit, (dir > 0) ? ds : -ds );
+        int dGrow = qMin( growLimit, (dir > 0) ? dg : -dg );
+
+        // Check the local possible deltas against the outer size constraints
+        if ( dShrink > dGrow ) // shrink, clip against min
+        {
+            int shrunk = dShrink - dGrow;
+            // add what has already grown or shrunk in the center
+            if ( childContainerShrinked )
+            {
+                shrunk += deltaMovedAbs;
+            }
+            else
+            {
+                shrunk -= deltaMovedAbs;
+            }
+
+            if ( shrunk > shrinkLimitParent )
+            {
+                // limit the delta to was is actually used / can be processed by the separatorMove
+                d = qMax( dShrink, dGrow );
+                d -= (shrunk - shrinkLimitParent);
+
+                if ( !childContainerShrinked )
+                {
+                    d -= deltaMovedAbs;
+                }
+
+                if ( d < 0 )
+                {
+                    d = 0;
+                }
+
+                d *= dir;
+            }
+        }
+        else if ( dShrink < dGrow )// grow clip against max
+        {
+            int grown = dGrow - dShrink;
+            // add what has already grown or shrunk in the center
+            if ( childContainerShrinked ) 
+            {
+                grown -= deltaMovedAbs;
+            }
+            else
+            {
+                grown += deltaMovedAbs;
+            }
+
+            if ( grown > growLimitParent )
+            {
+                // limit the delta to was is actually used / can be processed by the separatorMove
+                d = qMax( dShrink, dGrow );
+                d -= (grown - growLimitParent);
+
+                if ( childContainerShrinked )
+                {
+                    d -= deltaMovedAbs;
+                }
+
+                if ( d < 0 )
+                {
+                    d = 0;
+                }
+
+                d *= dir;
+            }
+        }
+        else if ( dShrink == 0 && dGrow == 0 )
+        {
+            d = 0;
+        }
+
+        deltaNotMovedNestedChild = d;
+    }
+    deltaNotMovedReturn -= deltaNotMovedNestedChild;
+    // end of pre-calculation step
+
+    int dShrink = 0;
+    int dGrow = 0;
+
+    int idxShrink = (dir < 0) ? nextLayoutItemIndexInFront( info, index ) : nextLayoutItemIndexBehind( info, index );
+    if ( idxShrink >= 0 && idxShrink < info->item_list.count() )
+    {
+        int s = deltaNotMovedNestedChild;
+        if ( !childContainerShrinked )
+        {
+            s += deltaMoved;
+        }
+
+        smi.doGrow = false;
+        dShrink = qAbs( info->separatorMove( idxShrink, s, &smi, false ) );
+    }
+
+    int idxGrow = (dir < 0) ? nextLayoutItemIndexBehind( info, index ) : nextLayoutItemIndexInFront( info, index );
+    if ( idxGrow >= 0 && idxGrow < info->item_list.count() )
+    {
+        int g = deltaNotMovedNestedChild;
+        if ( childContainerShrinked )
+        {
+            g += deltaMoved;
+        }
+
+        smi.doGrow = true;
+        dGrow = qAbs( info->separatorMove( idxGrow, g, &smi, false ) );
+    }
+
+    if ( childContainerShrinked )
+    {
+        dShrink += deltaMovedAbs;
+    }
+    else
+    {
+        dGrow += deltaMovedAbs;
+    }
+
+    // determine return values
+    containerShrinkedReturn = (dShrink > dGrow);
+    deltaContainerChangedReturn = calcDeltaContainerChanged( dShrink, dGrow, dir );
+
+    // max delta that has been processed
+    int deltaUsed = dir * qMax( dShrink, dGrow ); 
+    deltaNotMovedReturn += (recDelta + deltaNotMovedNestedChild) - deltaUsed;
+}
+
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// This method is helper that gets called by separatorShiftMoveRecursive().
+// It is used for the resizing of the layout items of the innermost dock 
+// layout container, at the end of the separator index path.
+// The method resized the layout items similar to the default layout 
+// implementation of separatorMoveHelper(), with the difference that it 
+// grows and shrinks the layout items on both sides without taking in 
+// account the size limits of the opposite side.
+// The method also does a pre-calculation step for determining if a
+// resulting dock layout container change would violate any size 
+// constraints and adapts the applied delta.
+//-------------------------------------------------------------------------
+void doInnermostContainerResize( QDockAreaLayoutInfo* info, int index,
+    int delta,
+    Qt::Orientation dockAreaOrientation,
+    int shrinkLimitParent,
+    int growLimitParent,
+    bool& containerShrinkedReturn,
+    int& deltaContainerChangedReturn,
+    int& deltaNotMovedReturn )
+{
+    if ( !info )
+    {
+        return;
+    }
+
+    // Determine resize direction.
+    int dir = (delta < 0) ? -1 : 1;
+
+    // Do a layout pre-calculation step.
+    deltaNotMovedReturn = delta;
+    {
+        // Move what is locally possible
+        int gl = calcGrowLimitBehind( info, info->o, index, dir, true );
+        int sl = calcShrinkLimitAhead( info, info->o, index, dir, true );
+        int deltaShrink = qMin( sl, (dir > 0) ? delta : -delta );
+        int deltaGrow = qMin( gl, (dir > 0) ? delta : -delta );
+
+        if ( deltaShrink > deltaGrow ) // shrink, clip against min
+        {
+            int shrunk = deltaShrink - deltaGrow;
+            if ( shrunk > shrinkLimitParent )
+            {
+                // Limit the delta to was is actually used / can be processed by the separatorMove
+                delta = qMax( deltaShrink, deltaGrow );
+                delta -= (shrunk - shrinkLimitParent);
+                if ( delta < 0 )
+                {
+                    delta = 0;
+                }
+                delta *= dir;
+            }
+        }
+        else if ( deltaShrink < deltaGrow )// grow clip against max
+        {
+            int grown = deltaGrow - deltaShrink;
+            if ( grown > growLimitParent )
+            {
+                // Limit the delta to was is actually used / can be processed by the separatorMove
+                delta = qMax( deltaShrink, deltaGrow );
+                delta -= (grown - growLimitParent);
+                if ( delta < 0 )
+                {
+                    delta = 0;
+                }
+                delta *= dir;
+            }
+        }
+    }
+    deltaNotMovedReturn -= delta;
+    // End of pre-calculation step
+
+    // Do the actual separator move.
+    SeparatorMoveInfo smi;
+    smi.doTwoSidedMove = true;
+    int deltaMoved = info->separatorMove( index, delta, &smi, false );
+
+    if ( smi.deltaContainerChangedReturn != 0 ) // that's what the container has shrunk/grown
+    {
+        containerShrinkedReturn = smi.containerShrinkedReturn;
+        deltaContainerChangedReturn = smi.deltaContainerChangedReturn;
+        deltaNotMovedReturn += smi.deltaNotMovedReturn;
+    }
+    else
+    {
+        // container size hasn't been changed
+        deltaContainerChangedReturn = 0;
+        deltaNotMovedReturn += delta - deltaMoved;
+    }
+
+}
+
 //-------------------------------------------------------------------------
 // Autodesk 3ds Max addition: Extended docking resize behavior
 // This method does a nested two sided separator move, where the layout
@@ -3704,19 +4348,37 @@ int separatorMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaO
 // other side.
 // It is used when the users shift drags a separator.
 // It traverses down the separator path and starts the separator sliding 
-// from the inside to the outside. So first the moving is applied to the
-// actual resized items and then when the resizing hits the items size 
-// constraints the rest of the moving delta is promoted up to the next 
-// parent container. When the parent container changes its layout item 
-// sizes, due to the promoted sliding on this level, it will also apply a 
-// recursive single sided move again on the nested children along the 
-// original separator path. In that way the nested items grow/shrink 
-// accordingly to what the parent container is doing on its level.
+// from the inside to the outside. 
+// For the layout item resizing it uses two methods:
+// doInnermostContainerResize() which applies to the layout items of the 
+// innermost dock layout container, at the end of the separator index path,
+// and doNestedContainerResize() which is used for the layout container 
+// inbetween when separatorShiftMoveRecursive() steps out of recursion.
+//
+// The base logic is that inner layout items can freely grow/shrink 
+// according to the incoming move delta and without violating any size 
+// constraints. When the layout container has changed its size due to 
+// an unequal grow and shrink, which might be caused by hitting the size 
+// limits, this container change delta and the unused move delta is 
+// promoted up to the next parent container.
+// The parent container first resizes the container at the current index 
+// path according to the child's change, and then layout items ahead and 
+// behind the indexed container depending on what's left over from the last 
+// recursion step plus the amount of the container change.
+// This layout item adaption is applied every recursion step backwards.
+// When finally there is a container change delta left over, this is
+// applied to the main dock grid.
 //-------------------------------------------------------------------------
-int separatorShiftMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaOrientation,
-    const QList<int> &path, int delta, int& deltaMovedSum )
+int separatorShiftMoveRecursive( QDockAreaLayoutInfo* info,
+    Qt::Orientation dockAreaOrientation,
+    const QList<int>& path,
+    int delta,
+    int shrinkLimitParent,
+    int growLimitParent,
+    int& deltaNotMovedReturn,
+    bool& containerShrinkedReturn )
 {
-    if ( !info || path.isEmpty() )
+    if ( delta == 0 || !info || path.isEmpty() )
     {
         return 0;
     }
@@ -3726,68 +4388,80 @@ int separatorShiftMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dock
 #endif
 
     int returnDelta = 0;
-
     int index = path.first();
     if ( index >= 0 && index < info->item_list.count() )
     {
+        QDockAreaLayoutItem& li = info->item_list[index];
+
         // Traverse down the path first to the inner item that was resized by the separator.
-        QDockAreaLayoutItem& li = info->item_list[index] ;
+        int deltaNotMovedNestedChild = 0;
+        bool childContainerShrinked = false;
         if ( path.count() > 1 && li.subinfo != nullptr )
         {
-            returnDelta = separatorShiftMoveRecursive( li.subinfo, dockAreaOrientation, path.mid( 1 ), delta, deltaMovedSum );
+            // Calculate the limits that the nested container, we step into next,
+            // is allowed to shrink/grow.
+
+            // Limits of the current container
+            int size = pick( dockAreaOrientation, info->size() );
+            int minimumSize = pick( dockAreaOrientation, info->minimumSize() );
+            int shrinklim = size - minimumSize;
+
+            int maximumSize = pick( dockAreaOrientation, info->maximumSize() );
+            int growlim = maximumSize - size;
+
+            // Look what space we have available ahead/behind of the container we step into.
+            int shrinkLimitAhead = 0;
+            int growLimitBehind = 0;
+            
+            if ( info->o == dockAreaOrientation )
+            {
+                shrinkLimitAhead = calcShrinkLimitAhead( info, dockAreaOrientation, index, delta );
+                growLimitBehind = calcGrowLimitBehind( info, dockAreaOrientation, index, delta );
+            }
+
+            // Clip the nested shrinking/growing against what's possible in the parent container.
+            int shrinkLimitChild = qMin( growLimitBehind + shrinkLimitParent, shrinklim );
+            int growLimitChild = qMin( shrinkLimitAhead + growLimitParent, growlim );
+
+            // Step further down into the nested container.
+            returnDelta = separatorShiftMoveRecursive( li.subinfo, dockAreaOrientation, path.mid( 1 ), delta, 
+                shrinkLimitChild, growLimitChild,
+                deltaNotMovedNestedChild,
+                childContainerShrinked );
         }
 
-        // Only apply the size / move change of the inner container,
-        // if we share the same orientation as the master dock area.
+        // From here we step out of recursion again
+
         if ( info->o == dockAreaOrientation )
         {
             int recDelta = (path.count() == 1) ? delta // apply full delta on the actual resized inner item
-                                               : returnDelta; // apply whats left over from recursion
+                : returnDelta; // apply the delta of the container change when we step out of recursion
 
-            if ( recDelta != 0 )
+            if ( recDelta != 0 || deltaNotMovedNestedChild != 0 )
             {
-                // Correct the index when we step out of recursion, so that it points properly 
-                // to the next layout item that gets the size change promoted.
-                if ( path.count() > 1 )
+                int deltaContainerChanged = 0;
+
+                if ( path.count() == 1 )
                 {
-                    if ( recDelta < 0 )
-                    {
-                        do
-                        {
-                            index -= 1;
-                            if ( index >= 0 )
-                            {
-                                // is next item in front of us valid?
-                                if ( !info->item_list[index].skip() )
-                                    break;
-                            }
-                            else // no item ahead, skip recursion to next upper container
-                            {
-                                // don't do a two sided resize if we are already at the beginning
-                                // cause there is nothing in front to make smaller
-                                return recDelta;
-                            }
-
-                        } while ( index >= 0 );
-                    }
+                    doInnermostContainerResize( info, index, recDelta, dockAreaOrientation,
+                        shrinkLimitParent, growLimitParent,
+                        containerShrinkedReturn, deltaContainerChanged, deltaNotMovedReturn );
                 }
-
-                int deltaMoved = info->separatorMove( index, recDelta, nullptr, false );
-                deltaMovedSum += deltaMoved;
-                returnDelta = recDelta - deltaMoved;
-
-                // When we've resized container items on a parent nested level, we need to 
-                // propagate the size change down along the separator path to the original
-                // layout item so that the nested items can grow/shrink accordingly to the
-                // movement on this container level.
-                if ( path.count() > 1 && li.subinfo != nullptr && deltaMoved != 0 )
+                else
                 {
-                    int deltaNotMoved = 0;
-                    SeparatorMoveInfo smi;
-                    smi.doGrow = true;
-                    separatorMoveRecursive( li.subinfo, dockAreaOrientation, path.mid( 1 ), deltaMoved, smi, deltaNotMoved, false, true );
+                    doNestedContainerResize( info, index, recDelta, deltaNotMovedNestedChild,
+                        childContainerShrinked, dockAreaOrientation,
+                        shrinkLimitParent, growLimitParent,
+                        containerShrinkedReturn, deltaContainerChanged, deltaNotMovedReturn );
                 }
+   
+                return deltaContainerChanged;
             }
+        }
+        else // skip container with opposite orientation
+        {
+            deltaNotMovedReturn = deltaNotMovedNestedChild;
+            containerShrinkedReturn = childContainerShrinked;
         }
     }
 
@@ -3851,21 +4525,34 @@ int separatorMoveExt( QDockAreaLayout* layout, Qt::Orientation dockAreaOrientati
         }
     }
 
-    if ( !skipNestedSeparatorMove)
+    if ( !skipNestedSeparatorMove )
     {
         // Do a shift move which resizes both sides of the separator (shrink & grow).
         if ( shiftPressed )
         {
-            int deltaMovedSum = 0; // sum of all shift moves happened through the recursion
-            separatorShiftMoveRecursive( &layout->docks[firstIndex], dockAreaOrientation, path.mid( 1 ), delta, deltaMovedSum );
-            // If there is something left over from the shift move, which means not all of
-            // the moving delta could be applied, then the rest will be used for 
-            // a for single sided move.
-            delta -= deltaMovedSum; 
-        }
+            // Calculate the size limits for the first container we step into.
+            int shrinklimit = QLAYOUTSIZE_MAX;
+            int growlimit = QLAYOUTSIZE_MAX;
 
+            if ( ((delta > 0) && (firstIndex == QInternal::LeftDock || firstIndex == QInternal::TopDock)) ||
+                ((delta < 0) && (firstIndex == QInternal::RightDock || firstIndex == QInternal::BottomDock)) )
+            {
+                shrinklimit = 0; // nested container not allowed to get smaller for the given direction
+                growlimit = calcShrinkLimitAhead( layout, firstIndex, delta );
+            }
+            else
+            {
+                shrinklimit = calcShrinkLimitAhead( layout, firstIndex, delta );
+                growlimit = 0; // nested container not allowed to grow for the given direction
+            }
+
+            int deltaNotMoved = 0; bool containerShrinked = false; // not from interest at this level we only care about deltaContainerChanged
+            centerSeparatorMoveDelta = separatorShiftMoveRecursive( &layout->docks[firstIndex], dockAreaOrientation, path.mid( 1 ), delta, 
+                shrinklimit, growlimit, deltaNotMoved, containerShrinked );
+
+        }
         // Do a single sided separator move (shrink or grow).
-        if ( delta != 0 )
+        else
         {
             QVector<QLayoutStruct> list;
             if ( firstIndex == QInternal::LeftDock || firstIndex == QInternal::RightDock )
@@ -3897,8 +4584,10 @@ int separatorMoveExt( QDockAreaLayout* layout, Qt::Orientation dockAreaOrientati
             // Try to squeeze the rest in front of the separator together, this equals to a shift move separator.
             if ( deltaSqueeze != 0 )
             {
-                int deltaMovedSum = 0;
-                separatorShiftMoveRecursive( &layout->docks[firstIndex], dockAreaOrientation, path.mid( 1 ), deltaSqueeze, deltaMovedSum );
+                bool containerShrinked = false; // not from interest at this level we only care about deltaContainerChanged
+                // shrink / grow limits are zero since we are already at the min border for this resize
+                separatorShiftMoveRecursive( &layout->docks[firstIndex], dockAreaOrientation, path.mid( 1 ), deltaSqueeze, 
+                    0, 0, deltaNotMoved, containerShrinked );
             }
         }
     }

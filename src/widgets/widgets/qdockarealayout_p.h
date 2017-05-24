@@ -141,6 +141,20 @@ public:
 
     // Indicates whether we should do a grow or shrink.
     bool doGrow = false;
+
+    // Indicates if we should do a single sided or two sided separator resizing.
+    bool doTwoSidedMove = false;
+
+    // Returns the amount the layout container has changed.
+    int deltaContainerChangedReturn = 0;
+
+    // Returns if the layout container was shrunk or grown.
+    int containerShrinkedReturn = false;
+
+    // Returns the delta of the separator move that wasn't processed,
+    // due to some min/max constraints.
+    int deltaNotMovedReturn = 0;
+    
 };
 //-------------------------------------------------------------------------
 

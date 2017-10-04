@@ -413,6 +413,34 @@ void QWindowSystemInterfacePrivate::postWindowSystemEvent(WindowSystemEvent *ev)
 bool QWindowSystemInterfacePrivate::handleWindowSystemEvent(QWindowSystemInterfacePrivate::WindowSystemEvent *ev)
 {
     bool accepted = true;
+
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: For 3ds Max we need synchronize the 
+    // processing of the focus / activation events with the actual incoming
+    // WIN32 events. The order of the event processing is essential due 
+    // to the usage of different ui frameworks (Qt, WIN32, .NET).
+    // Qt focus events need to happen in correspondence with e.g. the WIN32 
+    // events on other native application windows, otherwise they'll 
+    // interfere with each other and in the case of 3ds Max for instance 
+    // the Max accelerator flag might be not correctly set or the  
+    // ActionTables are not properly activated / deactivated.
+    //------------------------------------------------------------------
+    if ( ev && ev->type == ActivatedWindow )
+    {
+        if ( qApp )
+        {
+            auto prop = qApp->property( "_3dsmax_syncFocusEvents" );
+            if ( prop.isValid() && prop.toBool() == true )
+            {
+                // Put the event at the back of the queue.
+                postWindowSystemEvent( ev );
+                // Flush all queued events to ensure proper execution order.
+                return QWindowSystemInterface::flushWindowSystemEvents();
+            }
+        }
+    }
+
+
     if (synchronousWindowSystemEvents) {
         if (QThread::currentThread() == QGuiApplication::instance()->thread()) {
             // Process the event immediately on the current thread and return the accepted state.

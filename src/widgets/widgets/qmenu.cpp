@@ -3355,6 +3355,10 @@ void QMenu::internalDelayedPopup()
     const QPoint rightPos(mapToGlobal(QPoint(actionRect.right() + subMenuOffset + 1, actionRect.top())));
 
     d->activeMenu->popup(rightPos);
+
+    if (!d->activeMenu) 
+        return;
+
     d->sloppyState.setSubMenuPopup(actionRect, d->currentAction, d->activeMenu);
 
 #if !defined(Q_OS_DARWIN)

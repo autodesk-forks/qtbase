@@ -45,6 +45,7 @@
 #include <QtCore/qmap.h>
 #include <QtCore/qpair.h>
 #include <QtCore/qsettings.h>
+#include <QtCore/qlibrary.h>
 #include <QtGui/qaccessible.h>
 #include <QtGui/qguiapplication.h>
 #include <qpa/qplatformnativeinterface.h>
@@ -470,6 +471,48 @@ HRESULT STDMETHODCALLTYPE QWindowsMsaaAccessible::Invoke(long dispIdMember,
     return hr;
 }
 
+//-----------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+//-----------------------------------------------------------------------------
+// Some QWidgets in 3ds Max are hosting native legacy HWNDs showing various UI 
+// elements. To allow those embedded HWNDs to show up in the accessibility tree
+// used by automation, we simply inject the native IAccessible object as a 
+// child object back into the resulting hierarchy.
+// This small helper function allows us to check if we do have some native HWND
+// hosted in the current QWidget and returns that eventually.
+// The 3ds Max team has patched the QWinHost class of the QtWinMigrate 
+// project also to use this property accordingly. 
+//-----------------------------------------------------------------------------
+static inline HWND get_3dsmax_hosted_hwnd( QAccessibleInterface* accessible )
+{
+    if ( auto obj = accessible->object() )
+    {
+        auto prop = obj->property( "_3dsmax_hosted_hwnd" );
+        if ( prop.isValid() )
+        {
+            if ( HWND nativeChildHWND = reinterpret_cast<HWND>( qvariant_cast<void*>( prop ) ) )
+            {
+                if ( IsWindow( nativeChildHWND ) )
+                {
+                    return nativeChildHWND;
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
+static HRESULT accessibleObjectFromWindow( HWND hwnd, IDispatch** ppdispChild )
+{
+    typedef LRESULT( WINAPI *AccessibleObjectFromWindow )( HWND, DWORD, REFIID, void ** );
+    static AccessibleObjectFromWindow _accessibleObjectFromWindow = (AccessibleObjectFromWindow)QLibrary::resolve( QLatin1String( "oleacc.dll" ), "AccessibleObjectFromWindow" );
+    if ( _accessibleObjectFromWindow )
+    {
+        return _accessibleObjectFromWindow( hwnd, (DWORD)OBJID_CLIENT, IID_IAccessible, (void**)ppdispChild );
+    }
+}
+//-----------------------------------------------------------------------------
+
 /*
   IAccessible
 
@@ -509,6 +552,24 @@ HRESULT STDMETHODCALLTYPE QWindowsMsaaAccessible::accHitTest(long xLeft, long yT
             return S_OK;
         }
     } else {
+        //---------------------------------------------------------------------
+        // Autodesk 3ds Max Addition
+        //---------------------------------------------------------------------
+        // Here we check if the child accessible Qt found is hosting a native 
+        // HWND. If so, we skip Qt's wrapped object and jump straight to the 
+        // native accessible retrieved from that hosted HWND.
+        // As a result of this skipping, the hosting QWidget won't appear in 
+        // the accessible hierarchy at all - it gets transparently replaced by 
+        // the hosted HWND. In order to work as expected, the hosted HWND must 
+        // therefore infill the hosting QWidget completely.
+        //---------------------------------------------------------------------
+        if ( HWND nativeChildHWND = get_3dsmax_hosted_hwnd( child ) )
+        {
+            pvarID->vt = VT_DISPATCH;
+            pvarID->pdispVal = nullptr;
+            return accessibleObjectFromWindow( nativeChildHWND, &pvarID->pdispVal );
+        }
+        //---------------------------------------------------------------------
         IAccessible *iface = QWindowsAccessibility::wrap(child);
         if (iface) {
             (*pvarID).vt = VT_DISPATCH;
@@ -694,6 +755,24 @@ HRESULT STDMETHODCALLTYPE QWindowsMsaaAccessible::get_accChild(VARIANT varChildI
 
     QAccessibleInterface *acc = childPointer(accessible, varChildID);
     if (acc && acc->isValid()) {
+
+        //---------------------------------------------------------------------
+        // Autodesk 3ds Max Addition
+        //---------------------------------------------------------------------
+        // Here we check if the child accessible Qt found is hosting a native 
+        // HWND. If so, we skip Qt's wrapped object and jump straight to the 
+        // native accessible retrieved from that hosted HWND.
+        // As a result of this skipping, the hosting QWidget won't appear in
+        // the accessible hierarchy at all - it gets transparently replaced by 
+        // the hosted HWND. In order to work as expected, the hosted HWND must
+        // therefore infill the hosting QWidget completely.
+        //---------------------------------------------------------------------
+        if ( HWND nativeChildHWND = get_3dsmax_hosted_hwnd( acc ) )
+        {
+            return accessibleObjectFromWindow( nativeChildHWND, ppdispChild );
+        }
+        //---------------------------------------------------------------------
+
         *ppdispChild = QWindowsAccessibility::wrap(acc);
         return S_OK;
     }

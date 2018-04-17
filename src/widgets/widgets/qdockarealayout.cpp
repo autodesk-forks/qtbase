@@ -169,6 +169,23 @@ bool doExtendedDockWidgetResize( QMainWindow* mainWindow )
     return false;
 }
 
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Retain dock widget sizes
+// This method returns if the mechanism for retaining the frame sizes
+// of the dock widgets when docking/undocking a neighboring panels is
+// enabled for a main window or not.
+//-------------------------------------------------------------------------
+bool retainDockWidgetSizes( QMainWindow* mainWindow )
+{
+    if ( mainWindow )
+    {
+        auto prop = mainWindow->property( "_3dsmax_disable_retain_dockwidget_sizes" );
+        return (!prop.isValid() || prop.toBool() == false);
+    }
+    return false;
+}
+
 //-------------------------------------------------------------------------
 // Autodesk 3ds Max addition: Extended docking resize behavior
 // This method wraps the layout items default implementation of hasFixedSize().
@@ -1571,6 +1588,14 @@ bool QDockAreaLayoutInfo::insertGap(const QList<int> &path, QLayoutItem *dockWid
             item.subinfo = new_info;
             item.widgetItem = 0;
             item.placeHolderItem = 0;
+
+            //-------------------------------------------------------------------------
+            // Autodesk 3ds Max addition: Retain dock widget sizes
+            // Copy over the old rect to the new inserted subinfo so that size methods 
+            // work properly on it. Otherwise e.g. calling get tabContentRect()
+            // afterwards returns an empty rect.
+            new_info->rect = r;
+            //-------------------------------------------------------------------------
 
             QDockAreaLayoutItem new_item
                 = widgetItem == 0
@@ -3286,8 +3311,135 @@ void QDockAreaLayout::setGrid(QVector<QLayoutStruct> *ver_struct_list,
     }
 }
 
+
+namespace
+{
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Retain dock widget sizes
+// Helper function that updates the rectangles of the given
+// QDockAreaLayoutInfo structure to the actual content sizes.
+// In that way already undocked/hidden or newly docked/shown widgets are
+// respected by the subinfo's rectangle and when fitLayout() is
+// called afterwards, it will maintain the dock frame sizes and will not
+// distribute the freed space to all other widgets in the container,
+// which would imply a size changes of all contained dock widgets. 
+//-------------------------------------------------------------------------
+QSize updateDockAreaSubInfoRects( QDockAreaLayoutInfo* info, int sep )
+{
+    if ( !info )
+    {
+        return QSize( 0, 0 );
+    }
+
+    QSize infoSize;
+    if ( info->tabbed )
+    {
+        infoSize = info->tabContentRect().size();
+        if ( !infoSize.isEmpty() )
+        {
+            QSize minSize = info->minimumSize();
+            QSize maxSize = info->maximumSize();
+            infoSize = infoSize.boundedTo( maxSize ).expandedTo( minSize );
+        }
+    }
+    else
+    {
+        Qt::Orientation o = info->o;
+        const QDockAreaLayoutItem* previous = nullptr;
+        int a = 0, b = 0;
+
+        for ( int i = 0; i < info->item_list.count(); ++i )
+        {
+            QDockAreaLayoutItem& item = info->item_list[i];
+            if ( item.skip() )
+            {
+                continue;
+            }
+
+            bool gap = item.flags & QDockAreaLayoutItem::GapItem;
+
+            if ( previous && !gap && !(previous->flags &  QDockAreaLayoutItem::GapItem) )
+            {
+                a += sep;
+            }
+
+            if ( gap )
+            {
+                a += item.size;
+            }
+            else if ( item.widgetItem != nullptr )
+            {
+                int s = item.size;
+                if ( s == -1 ) // not valid yet, pick the sizeHint
+                {
+                    s = pick( o, item.widgetItem->sizeHint() );
+                }
+
+                a += s;
+            }
+            else if ( item.subinfo != nullptr )
+            {
+                QSize s = updateDockAreaSubInfoRects( item.subinfo, sep );
+
+                if ( pick( o, s ) <= 0 ) // still zero no valid rect
+                {
+                    // stick to old item size for this subinfo
+                    rpick( o, s ) = item.size;
+                    item.subinfo->rect.setSize( s );
+                }
+                else
+                    item.size = pick( o, s );
+
+                a += pick( o, s );
+                b = qMax( b, perp( o, s ) );
+            }
+
+            previous = &item;
+        }
+
+        rpick( o, infoSize ) = a;
+        rperp( o, infoSize ) = b;
+    }
+
+    // If one of the directions is not valid we stick to the old rectangle extends.
+    if ( infoSize.width() <= 0 )
+        infoSize.setWidth( info->rect.size().width() );
+
+    if ( infoSize.height() <= 0 )
+        infoSize.setHeight( info->rect.size().height() );
+
+    // Update subinfo rectangle with the new calculated size.
+    info->rect.setSize( infoSize );
+
+    return infoSize;
+}
+
+} // end anonymous namespace
+
+
 void QDockAreaLayout::fitLayout()
 {
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Retain dock widget sizes
+    // We try to retain the dock frame sizes when widgets are docked/undocked
+    // and fitLayout() is called afterwards.
+    // This is done by re-calculating the QDockAreaLayoutInfo subinfo rectangles
+    // on the actual content sizes. In that way when a dock widget e.g. gets
+    // undocked or hidden the subinfo rectangles won't include its size anymore.
+    // With the default Qt behavior the rectangles will still stay the same
+    // and fitLayout() will distribute the freed space to all other widgets
+    // in the container which means that they'll change their size, which is
+    // not intended for 3dsmax.
+    //-------------------------------------------------------------------------
+    if ( retainDockWidgetSizes( mainWindow ) )
+    {
+        updateDockAreaSubInfoRects( &docks[QInternal::LeftDock], sep );
+        updateDockAreaSubInfoRects( &docks[QInternal::RightDock], sep );
+        updateDockAreaSubInfoRects( &docks[QInternal::TopDock], sep );
+        updateDockAreaSubInfoRects( &docks[QInternal::BottomDock], sep );
+    }
+
     QVector<QLayoutStruct> ver_struct_list(3);
     QVector<QLayoutStruct> hor_struct_list(3);
     getGrid(&ver_struct_list, &hor_struct_list);
@@ -3485,6 +3637,28 @@ void QDockAreaLayout::addDockWidget(QInternal::DockPosition pos, QDockWidget *do
     QLayoutItem *dockWidgetItem = new QDockWidgetItem(dockWidget);
     QDockAreaLayoutInfo &info = docks[pos];
     if (orientation == info.o || info.item_list.count() <= 1) {
+
+        //-------------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Retain dock widget sizes
+        // Correct the pos and the size when we've just one layout item in the 
+        // container. 
+        // This is necessary since the orientation might be swapped by the code
+        // below this fix and in that case the old values won't be correct anymore,
+        // since pos/size were meant for the opposite orientation.
+        if ( orientation != info.o && info.item_list.count() == 1 )
+        {
+            // do it like in insertGab()
+            QDockAreaLayoutItem &item = info.item_list[0];
+            QDockAreaLayoutInfo *subinfo = item.subinfo;
+            QLayoutItem *widgetItem = item.widgetItem;
+            QPlaceHolderItem *placeHolderItem = item.placeHolderItem;
+            QRect r = subinfo == 0 ? widgetItem ? dockedGeometry( widgetItem->widget() ) : placeHolderItem->topLevelRect : subinfo->rect;
+
+            item.size = pick( orientation, r.size() );
+            item.pos = pick( orientation, r.topLeft() );
+        }
+        //-------------------------------------------------------------------------
+
         // empty dock areas, or dock areas containing exactly one widget can have their orientation
         // switched.
         info.o = orientation;
@@ -3705,66 +3879,6 @@ QList<int> findClosestInnerSeparator( QDockAreaLayoutInfo* info, Qt::Orientation
 
 //-------------------------------------------------------------------------
 // Autodesk 3ds Max addition: Extended docking resize behavior
-// This method returns the index of the next valid layout item in front 
-// of the specified index or -1 if nothing valid is there.
-//-------------------------------------------------------------------------
-int nextLayoutItemIndexInFront( QDockAreaLayoutInfo* info, int index )
-{
-    if ( info )
-    {
-        do
-        {
-            index -= 1;
-            if ( index >= 0 )
-            {
-                // is next item in front of us valid?
-                if ( !info->item_list[index].skip() )
-                    return index;
-            }
-            else // no item ahead
-            {
-                return -1;
-            }
-
-        } while ( index >= 0 );
-    }
-
-    return -1;
-}
-
-
-//-------------------------------------------------------------------------
-// Autodesk 3ds Max addition: Extended docking resize behavior
-// This method returns the index of the next valid layout item behind
-// the specified index or -1 if nothing valid is there.
-//-------------------------------------------------------------------------
-int nextLayoutItemIndexBehind( QDockAreaLayoutInfo* info, int index )
-{
-    if ( info )
-    {
-        do
-        {
-            index += 1;
-            if ( index < info->item_list.count() )
-            {
-                // is next item behind us valid?
-                if ( !info->item_list[index].skip() )
-                    return index;
-            }
-            else // no item behind
-            {
-                return -1;
-            }
-
-        } while ( index < info->item_list.count() );
-    }
-
-    return -1;
-}
-
-
-//-------------------------------------------------------------------------
-// Autodesk 3ds Max addition: Extended docking resize behavior
 // This method does a nested single sided separator move, where the layout
 // items are just either growing or shrinking.
 // It traverses down the separator path and starts growing / shrinking
@@ -3876,7 +3990,7 @@ int separatorMoveRecursive( QDockAreaLayoutInfo* info, Qt::Orientation dockAreaO
             {
                 if ( info->dockPos == QInternal::LeftDock || info->dockPos == QInternal::TopDock )
                 {
-                    index = nextLayoutItemIndexInFront( info, index );
+                    index = info->prev( index );
                 }
 
                 if ( index >= 0 && index < info->item_list.count() )
@@ -4203,7 +4317,7 @@ void doNestedContainerResize( QDockAreaLayoutInfo* info, int index, int recDelta
     int dShrink = 0;
     int dGrow = 0;
 
-    int idxShrink = (dir < 0) ? nextLayoutItemIndexInFront( info, index ) : nextLayoutItemIndexBehind( info, index );
+    int idxShrink = (dir < 0) ? info->prev( index ) : info->next( index );
     if ( idxShrink >= 0 && idxShrink < info->item_list.count() )
     {
         int s = deltaNotMovedNestedChild;
@@ -4216,7 +4330,7 @@ void doNestedContainerResize( QDockAreaLayoutInfo* info, int index, int recDelta
         dShrink = qAbs( info->separatorMove( idxShrink, s, &smi, false ) );
     }
 
-    int idxGrow = (dir < 0) ? nextLayoutItemIndexBehind( info, index ) : nextLayoutItemIndexInFront( info, index );
+    int idxGrow = (dir < 0) ? info->next( index ) : info->prev( index );
     if ( idxGrow >= 0 && idxGrow < info->item_list.count() )
     {
         int g = deltaNotMovedNestedChild;
@@ -4635,10 +4749,8 @@ int QDockAreaLayout::separatorMove(const QList<int> &separator, const QPoint &or
     int delta = 0;
     int index = separator.last();
 
-
     // extended 3dsmax dock widget resize behavior
-    auto prop = mainWindow->property( "_3dsmax_disable_extended_docking_resize" );
-    if ( !prop.isValid() || prop.toBool() == false )
+    if ( doExtendedDockWidgetResize( mainWindow ) )
     {
         QDockAreaLayoutInfo* info = this->info( separator );
         if ( info )

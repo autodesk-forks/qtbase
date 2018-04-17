@@ -269,11 +269,11 @@ void Win32MakefileGenerator::processRcFileVar()
         // that to "1" for update 1, "2" for update 2. "3" for update 3, etc.
         // This is needed to allow the patch scripts to replace the dlls with
         // the newer version during the update installation.
-        // "5.6.2.0" -> "5.6.2.1"
+        // "5.6.2.0" -> "5.6.2.2"
         //---------------------------------------------------------------------
         for (int i = vers.size(); i < 4; i++)
         {
-            vers += "1"; //for 3ds Max Update 1
+            vers += "2"; //for 3ds Max Update 2
         }
         QString versionString = vers.join('.');
 

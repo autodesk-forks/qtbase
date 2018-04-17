@@ -46,6 +46,8 @@ QT_BEGIN_NAMESPACE
 class QPlatformScreen;
 
 class QWindowsDropMimeData : public QWindowsInternalMimeData {
+    Q_OBJECT
+    Q_PROPERTY( IDataObject* IDataObject READ retrieveDataObject )
 public:
     QWindowsDropMimeData() {}
     IDataObject *retrieveDataObject() const Q_DECL_OVERRIDE;

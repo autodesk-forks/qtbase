@@ -1141,6 +1141,26 @@ void QMainWindow::addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget
     d_func()->layout->addDockWidget(area, dockwidget, orientation);
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+/*!
+    Adds \a dockwidget into the given \a area in the direction
+    specified by the \a orientation.
+    By setting \a toFront to true, the \a dockwidget is placed at the front
+    of the docking area container instead of appending it to the end, which
+    corresponds to the default behavior.
+*/
+//-------------------------------------------------------------------------
+void QMainWindow::addDockWidget( Qt::DockWidgetArea area, QDockWidget *dockwidget,
+    Qt::Orientation orientation, bool toFront )
+{
+    if ( !checkDockWidgetArea( area, "QMainWindow::addDockWidget" ) )
+        return;
+
+    d_func()->layout->addDockWidget( area, dockwidget, orientation, toFront );
+}
+
+
 /*!
     \fn void QMainWindow::splitDockWidget(QDockWidget *first, QDockWidget *second, Qt::Orientation orientation)
 
@@ -1434,7 +1454,10 @@ bool QMainWindow::event(QEvent *event)
             d->adjustCursor(QPoint(0, 0));
             return true;
         case QEvent::ShortcutOverride: // when a menu pops up
-            d->adjustCursor(QPoint(0, 0));
+            if ( d->layout->movingSeparator.isEmpty() ) // Don't revert the cursor if we move a separator and a key is pressed.
+            {
+                d->adjustCursor( QPoint( 0, 0 ) );
+            }
             break;
 #endif // QT_NO_CURSOR
 

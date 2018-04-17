@@ -3355,6 +3355,10 @@ void QMenu::internalDelayedPopup()
     QPoint pos(rightPos);
 
     d->activeMenu->popup(pos);
+
+    if (!d->activeMenu) 
+        return;
+
     d->sloppyState.setSubMenuPopup(actionRect, d->currentAction, d->activeMenu);
 }
 

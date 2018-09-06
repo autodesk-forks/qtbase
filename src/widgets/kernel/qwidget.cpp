@@ -1822,6 +1822,7 @@ void QWidgetPrivate::createExtra()
         extra->nativeChildrenForced = 0;
         extra->inRenderWithPainter = 0;
         extra->hasWindowContainer = false;
+        extra->hasNativeChildren = false;
         extra->hasMask = 0;
         createSysExtra();
 #ifdef QWIDGET_EXTRA_DEBUG
@@ -4247,6 +4248,7 @@ QPoint QWidget::mapTo(const QWidget * parent, const QPoint & pos) const
         while (w != parent) {
             Q_ASSERT_X(w, "QWidget::mapTo(const QWidget *parent, const QPoint &pos)",
                        "parent must be in parent hierarchy");
+            if( !w ){ break; }
             p = w->mapToParent(p);
             w = w->parentWidget();
         }
@@ -4271,7 +4273,7 @@ QPoint QWidget::mapFrom(const QWidget * parent, const QPoint & pos) const
         while (w != parent) {
             Q_ASSERT_X(w, "QWidget::mapFrom(const QWidget *parent, const QPoint &pos)",
                        "parent must be in parent hierarchy");
-
+            if( !w ){ break; }
             p = w->mapFromParent(p);
             w = w->parentWidget();
         }
@@ -6497,7 +6499,14 @@ void QWidget::setFocus(Qt::FocusReason reason)
     if (!isEnabled())
         return;
 
-    QWidget *f = d_func()->deepestFocusProxy();
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max change: In 3ds Max we discovered crashes in Qt
+    // when during the focus change widgets that are affected by the change
+    // get deleted. To avoid a crash we keep track of the widgets with
+    // a QPointer and quit the function if a tracked widget got deleted
+    // during the focus change.
+    //------------------------------------------------------------------
+    QPointer<QWidget> f = d_func()->deepestFocusProxy();
     if (!f)
         f = this;
 
@@ -6507,6 +6516,8 @@ void QWidget::setFocus(Qt::FocusReason reason)
 #endif
        )
         return;
+
+    QPointer<QWidget> thisPtr = this;
 
 #if QT_CONFIG(graphicsview)
     QWidget *previousProxyFocus = 0;
@@ -6533,7 +6544,7 @@ void QWidget::setFocus(Qt::FocusReason reason)
     }
 #endif
 
-    if (f->isActiveWindow()) {
+    if (f && f->isActiveWindow()) {
         QWidget *prev = QApplicationPrivate::focus_widget;
         if (prev) {
             if (reason != Qt::PopupFocusReason && reason != Qt::MenuBarFocusReason
@@ -6550,6 +6561,16 @@ void QWidget::setFocus(Qt::FocusReason reason)
         f->d_func()->updateFocusChild();
 
         QApplicationPrivate::setFocusWidget(f, reason);
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max change: Tracked widgets has been deleted 
+        // during the focus change.
+        //------------------------------------------------------------------
+        if ( !thisPtr || !f )
+        {
+            return;
+        }
+
 #ifndef QT_NO_ACCESSIBILITY
 # ifdef Q_OS_WIN
         // The negation of the condition in setFocus_sys
@@ -6583,15 +6604,14 @@ void QWidget::setFocus(Qt::FocusReason reason)
 #endif
                     // Send event to self
                     QFocusEvent event(QEvent::FocusIn, reason);
-                    QPointer<QWidget> that = f;
                     QApplication::sendEvent(f, &event);
-                    if (that)
-                        QApplication::sendEvent(that->style(), &event);
+                    if (f)
+                        QApplication::sendEvent(f->style(), &event);
                 }
             }
         }
 #endif
-    } else {
+    } else if ( f ) {
         f->d_func()->updateFocusChild();
     }
 }
@@ -7132,6 +7152,90 @@ QSize QWidget::frameSize() const
     return data->crect.size();
 }
 
+bool QWidgetPrivate::propagateRaisedLoweredToChildren( QWidget* widget, bool raised )
+{
+    if ( !widget ) { return false; }
+    bool keep_flag = false;
+    foreach( QObject* child_object, widget->children() )
+    {
+        if ( auto child_widget = qobject_cast<QWidget*>( child_object ) )
+        {
+            if ( QWidgetPrivate* child_private = child_widget->d_func() )
+            {
+                if ( child_widget->testAttribute( Qt::WA_NativeWindow ) )
+                {
+                    if ( auto window = child_widget->windowHandle() )
+                    {
+                        if ( window->parent() )
+                        {
+                            if ( raised )
+                            {
+                                window->raise();
+                            }
+                            else
+                            {
+                                window->lower();
+                            }
+                        }
+                    }
+                    keep_flag = true;
+                }
+                else if ( child_private->extra && child_private->extra->hasNativeChildren )
+                {
+                    bool keep_child_flag = propagateRaisedLoweredToChildren( child_widget, raised );
+                    if ( !keep_child_flag )
+                    {
+                        child_private->extra->hasNativeChildren = false;
+                    }
+                    else
+                    {
+                        keep_flag = true;
+                    }
+                }
+            }
+        }
+    }
+    return keep_flag;
+}
+
+bool QWidgetPrivate::propagateMoveToChildren( QWidget* widget, QPoint offset )
+{
+    if ( !widget ) { return false; }
+    bool keep_flag = false;
+
+    foreach( QObject* child_object, widget->children() )
+    {
+        if ( auto child_widget = qobject_cast<QWidget*>( child_object ) )
+        {
+            if ( QWidgetPrivate* child_private = child_widget->d_func() )
+            {
+                if ( child_widget->testAttribute( Qt::WA_NativeWindow ) )
+                {
+                    if ( auto window = child_widget->windowHandle() )
+                    {
+                        auto p = child_widget->pos() + offset;
+                        window->setGeometry( QRect( p, child_widget->size() ) );
+                    }
+                    keep_flag = true;
+                }
+                else if ( child_private->extra && child_private->extra->hasNativeChildren )
+                {
+                    bool keep_child_flag = propagateMoveToChildren( child_widget, child_widget->pos() + offset );
+                    if ( !keep_child_flag )
+                    {
+                        child_private->extra->hasNativeChildren = false;
+                    }
+                    else
+                    {
+                        keep_flag = true;
+                    }
+                }
+            }
+        }
+    }
+    return keep_flag;
+}
+
 /*! \fn void QWidget::move(int x, int y)
 
     \overload
@@ -7158,8 +7262,20 @@ void QWidget::move(const QPoint &p)
         setAttribute(Qt::WA_PendingMoveEvent);
     }
 
-    if (d->extra && d->extra->hasWindowContainer)
-        QWindowContainer::parentWasMoved(this);
+    if ( d->extra )
+    {
+        if ( d->extra->hasWindowContainer )
+        {
+            QWindowContainer::parentWasMoved( this );
+        }
+        if ( d->extra->hasNativeChildren )
+        {
+            if ( testAttribute( Qt::WA_NativeWindow ) || ( d->propagateMoveToChildren( this, mapTo( nativeParentWidget(), QPoint() ) ) == false ) )
+            {
+                d->extra->hasNativeChildren = false;
+            }
+        }
+    }
 }
 
 // move() was invoked with Qt::WA_WState_Created not set (frame geometry
@@ -7230,8 +7346,20 @@ void QWidget::setGeometry(const QRect &r)
         setAttribute(Qt::WA_PendingResizeEvent);
     }
 
-    if (d->extra && d->extra->hasWindowContainer)
-        QWindowContainer::parentWasMoved(this);
+    if ( d->extra )
+    {
+        if ( d->extra->hasWindowContainer )
+        {
+            QWindowContainer::parentWasMoved( this );
+        }
+        if ( d->extra->hasNativeChildren )
+        {
+            if ( testAttribute( Qt::WA_NativeWindow ) || ( d->propagateMoveToChildren( this, mapTo( nativeParentWidget(), QPoint() ) ) == false ) )
+            {
+                d->extra->hasNativeChildren = false;
+            }
+        }
+    }
 }
 
 void QWidgetPrivate::setGeometry_sys(int x, int y, int w, int h, bool isMove)
@@ -10782,8 +10910,35 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
     }
 #endif
 
-    if (d->extra && d->extra->hasWindowContainer)
-        QWindowContainer::parentWasChanged(this);
+    if ( d->extra )
+    {
+        if ( d->extra->hasWindowContainer )
+        {
+            QWindowContainer::parentWasChanged( this );
+        }
+
+        // we re-flag the non-native parent chain.
+        if ( d->extra->hasNativeChildren || testAttribute(Qt::WA_NativeWindow) )
+        {
+            auto pw = parentWidget();
+            while ( pw )
+            {
+                if ( pw->testAttribute( Qt::WA_NativeWindow ) )
+                {
+                    break;
+                }
+                if ( auto pw_e = pw->d_func() ? pw->d_func()->extra : nullptr )
+                {
+                    if ( pw_e->hasNativeChildren )
+                    {
+                        break;
+                    }
+                    pw_e->hasNativeChildren = true;
+                }
+                pw = pw->parentWidget();
+            }
+        }
+    }
 }
 
 void QWidgetPrivate::setParent_sys(QWidget *newparent, Qt::WindowFlags f)
@@ -11877,8 +12032,22 @@ void QWidget::raise()
     if (testAttribute(Qt::WA_WState_Created))
         d->raise_sys();
 
-    if (d->extra && d->extra->hasWindowContainer)
-        QWindowContainer::parentWasRaised(this);
+    if (d->extra )
+    {
+        if ( d->extra->hasWindowContainer )
+        {
+            QWindowContainer::parentWasRaised(this);
+        }
+        if ( d->extra->hasNativeChildren )
+        {
+            if ( testAttribute( Qt::WA_NativeWindow ) || ( d->propagateRaisedLoweredToChildren( this, true ) == false ) )
+            {
+                d->extra->hasNativeChildren = false;
+            }
+        }
+    }
+
+
 
     QEvent e(QEvent::ZOrderChange);
     QApplication::sendEvent(this, &e);
@@ -11927,8 +12096,20 @@ void QWidget::lower()
     if (testAttribute(Qt::WA_WState_Created))
         d->lower_sys();
 
-    if (d->extra && d->extra->hasWindowContainer)
-        QWindowContainer::parentWasLowered(this);
+    if ( d->extra )
+    {
+        if (  d->extra->hasWindowContainer )
+        {
+            QWindowContainer::parentWasLowered(this);
+        }
+        if ( d->extra->hasNativeChildren )
+        {
+            if ( testAttribute( Qt::WA_NativeWindow ) || ( d->propagateRaisedLoweredToChildren( this, false ) == false ) )
+            {
+                d->extra->hasNativeChildren = false;
+            }
+        }
+    }
 
     QEvent e(QEvent::ZOrderChange);
     QApplication::sendEvent(this, &e);

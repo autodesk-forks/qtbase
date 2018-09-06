@@ -676,6 +676,11 @@ static inline bool findPlatformWindowHelper(const POINT &screenPoint, unsigned c
     if (!(cwexFlags & CWP_SKIPTRANSPARENT)
         && (GetWindowLongPtr(child, GWL_EXSTYLE) & WS_EX_TRANSPARENT)) {
         const HWND nonTransparentChild = ChildWindowFromPointEx(*hwnd, point, cwexFlags | CWP_SKIPTRANSPARENT);
+        
+        if ( !nonTransparentChild || nonTransparentChild == *hwnd ) {
+            return false;
+        }
+
         if (QWindowsWindow *nonTransparentWindow = context->findPlatformWindow(nonTransparentChild)) {
             *result = nonTransparentWindow;
             *hwnd = nonTransparentChild;
@@ -1430,7 +1435,7 @@ bool QWindowsContext::filterNativeEvent(MSG *msg, LRESULT *result)
 bool QWindowsContext::filterNativeEvent(QWindow *window, MSG *msg, LRESULT *result)
 {
     long filterResult = 0;
-    if (QWindowSystemInterface::handleNativeEvent(window, nativeEventType(), &msg, &filterResult)) {
+    if (QWindowSystemInterface::handleNativeEvent(window, nativeEventType(), msg, &filterResult)) {
         *result = LRESULT(filterResult);
         return true;
     }

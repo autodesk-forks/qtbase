@@ -3102,18 +3102,51 @@ bool QDockAreaLayout::restoreDockWidget(QDockWidget *dockWidget)
     return true;
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+// makes it possible to add a dock widget to the front of the dock area 
+// container so that the widget can appear close to the main windows center area.
+//-------------------------------------------------------------------------
 void QDockAreaLayout::addDockWidget(QInternal::DockPosition pos, QDockWidget *dockWidget,
-                                             Qt::Orientation orientation)
+                                             Qt::Orientation orientation, bool toFront)
 {
     QLayoutItem *dockWidgetItem = new QDockWidgetItem(dockWidget);
     QDockAreaLayoutInfo &info = docks[pos];
     if (orientation == info.o || info.item_list.count() <= 1) {
+
+        //-------------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Retain dock widget sizes
+        // Correct the pos and the size when we've just one layout item in the 
+        // container. 
+        // This is necessary since the orientation might be swapped by the code
+        // below this fix and in that case the old values won't be correct anymore,
+        // since pos/size were meant for the opposite orientation.
+        if ( orientation != info.o && info.item_list.count() == 1 )
+        {
+            // do it like in insertGab()
+            QDockAreaLayoutItem &item = info.item_list[0];
+            QDockAreaLayoutInfo *subinfo = item.subinfo;
+            QLayoutItem *widgetItem = item.widgetItem;
+            QPlaceHolderItem *placeHolderItem = item.placeHolderItem;
+            QRect r = subinfo == 0 ? widgetItem ? dockedGeometry( widgetItem->widget() ) : placeHolderItem->topLevelRect : subinfo->rect;
+
+            item.size = pick( orientation, r.size() );
+            item.pos = pick( orientation, r.topLeft() );
+        }
+        //-------------------------------------------------------------------------
+
         // empty dock areas, or dock areas containing exactly one widget can have their orientation
         // switched.
         info.o = orientation;
 
         QDockAreaLayoutItem new_item(dockWidgetItem);
-        info.item_list.append(new_item);
+
+        // Autodesk 3ds Max 'toFront' change, please see comment above.
+        if ( toFront )
+            info.item_list.insert( 0, new_item );
+        else
+            info.item_list.append(new_item);
+
 #if QT_CONFIG(tabbar)
         if (info.tabbed && !new_item.skip()) {
             info.updateTabBar();
@@ -3128,7 +3161,13 @@ void QDockAreaLayout::addDockWidget(QInternal::DockPosition pos, QDockWidget *do
 #endif
         QDockAreaLayoutInfo new_info(&sep, pos, orientation, tbshape, mainWindow);
         new_info.item_list.append(QDockAreaLayoutItem(new QDockAreaLayoutInfo(info)));
-        new_info.item_list.append(QDockAreaLayoutItem(dockWidgetItem));
+
+        // Autodesk 3ds Max 'toFront' change, please see comment above.
+        if ( toFront )
+            new_info.item_list.insert( 0, QDockAreaLayoutItem( dockWidgetItem ) );
+        else
+            new_info.item_list.append(QDockAreaLayoutItem(dockWidgetItem));
+
         info = new_info;
     }
 

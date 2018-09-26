@@ -165,6 +165,8 @@ public:
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget);
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
                        Qt::Orientation orientation);
+    void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
+                       Qt::Orientation orientation, bool toFront);
     void splitDockWidget(QDockWidget *after, QDockWidget *dockwidget,
                          Qt::Orientation orientation);
     void tabifyDockWidget(QDockWidget *first, QDockWidget *second);

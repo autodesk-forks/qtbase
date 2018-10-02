@@ -1105,6 +1105,20 @@ bool QMainWindow::restoreDockWidget(QDockWidget *dockwidget)
     return d_func()->layout->restoreDockWidget(dockwidget);
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+/*!
+    Raises \a dockwidget, if that \a dockWidget is tabbed together with other
+    dockwidgets, so that after calling this function the \a dockWidget is the
+    current one of the tabbed ones.
+*/
+//-------------------------------------------------------------------------
+void QMainWindow::raiseDockWidget(QDockWidget *dockwidget)
+{
+    d_func()->layout->activate(); // make sure the tabs are in place.
+    d_func()->layout->raise(dockwidget);
+}
+
 /*!
     Adds \a dockwidget into the given \a area in the direction
     specified by the \a orientation.

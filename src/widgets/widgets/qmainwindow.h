@@ -173,6 +173,7 @@ public:
     QList<QDockWidget*> tabifiedDockWidgets(QDockWidget *dockwidget) const;
     void removeDockWidget(QDockWidget *dockwidget);
     bool restoreDockWidget(QDockWidget *dockwidget);
+    Q_INVOKABLE void raiseDockWidget(QDockWidget *dockwidget);
 
     Qt::DockWidgetArea dockWidgetArea(QDockWidget *dockwidget) const;
 

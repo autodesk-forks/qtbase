@@ -57,6 +57,7 @@
 #include "qwhatsthis.h"
 #endif
 #include "private/qtextengine_p.h"
+#include "qmenu.h" // Adsk 3ds Max
 #ifndef QT_NO_ACCESSIBILITY
 #include "qaccessible.h"
 #endif
@@ -98,6 +99,48 @@ inline static bool verticalTabs(QTabBar::Shape shape)
            || shape == QTabBar::RoundedEast
            || shape == QTabBar::TriangularWest
            || shape == QTabBar::TriangularEast;
+}
+
+namespace
+{
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Refactors some Qt hit test code out, that is used in several places.
+//------------------------------------------------------------------
+inline bool isMousePosInCornerButtons( QTabBarPrivate* d, const QPoint& pos )
+{
+    return (!d->leftB->isHidden() && d->leftB->geometry().contains( pos ))
+        || (!d->rightB->isHidden() && d->rightB->geometry().contains( pos ))
+        || (!d->tabsMenuBtn->isHidden() && d->tabsMenuBtn->geometry().contains( pos ));
+}
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// The extra width is defined by the width of the 3 tool buttons
+// left scroll / right scroll / tabs menu button and their distance
+// to each other. This can vary depending on their visibility.
+//------------------------------------------------------------------
+int extraButtonWidth( const QTabBarPrivate* d, const QTabBar* q )
+{
+    const int btnWidth = qMax( q->style()->pixelMetric( QStyle::PM_TabBarScrollButtonWidth, 0, q ),
+        QApplication::globalStrut().width() );
+    const int btnOverlap = q->style()->pixelMetric( QStyle::PM_TabBar_ScrollButtonOverlap, 0, q );
+
+    int extra = 0;
+    if ( d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabScrollBtnsShown ) )
+    {
+        extra = 2 * btnWidth - btnOverlap;
+    }
+
+    if ( d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabMenuBtnShown ) )
+    {
+        const int tabsMenuBtnWidth = qMax( q->style()->pixelMetric( QStyle::PM_TabBarTabsMenuButtonWidth, 0, q ), QApplication::globalStrut().width() );
+        extra += tabsMenuBtnWidth - (d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabScrollBtnsShown ) ? btnOverlap : 0);
+    }
+
+    return extra;
+}
+
 }
 
 void QTabBarPrivate::updateMacBorderMetrics()
@@ -406,9 +449,14 @@ void QTabBarPrivate::init()
 #endif
         q->setFocusPolicy(Qt::TabFocus);
 
+    // Adsk 3ds Max: Adds the new tabs menu button.
+    tabsMenuBtn = new TabsMenuBtn( q );
+    tabsMenuBtn->hide();
+
 #ifndef QT_NO_ACCESSIBILITY
     leftB->setAccessibleName(QTabBar::tr("Scroll Left"));
     rightB->setAccessibleName(QTabBar::tr("Scroll Right"));
+    tabsMenuBtn->setAccessibleName( QTabBar::tr( "Tabs Menu Button" ) );
 #endif
     q->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     elideMode = Qt::TextElideMode(q->style()->styleHint(QStyle::SH_TabBar_ElideMode, 0, q));
@@ -550,6 +598,10 @@ void QTabBarPrivate::layoutTabs()
         QRect scrollButtonRightRect = q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
         int scrollButtonWidth = q->style()->pixelMetric(QStyle::PM_TabBarScrollButtonWidth, &opt, q);
 
+        // Adsk 3ds Max
+        QRect tabsMenuButtonRect = q->style()->subElementRect( QStyle::SE_TabBarTabsMenuButton, &opt, q );
+
+
         // Normally SE_TabBarScrollLeftButton should have the same width as PM_TabBarScrollButtonWidth.
         // But if that is not the case, we set the actual button width to PM_TabBarScrollButtonWidth, and
         // use the extra space from SE_TabBarScrollLeftButton as margins towards the tabs.
@@ -573,17 +625,29 @@ void QTabBarPrivate::layoutTabs()
             rightB->setArrowType(Qt::RightArrow);
         }
 
-        leftB->setGeometry(scrollButtonLeftRect);
-        leftB->setEnabled(false);
-        leftB->show();
+        if ( tabScrollBtnOptions.testFlag( TabScrollBtnsShown ) )
+        {
+            leftB->setGeometry( scrollButtonLeftRect );
+            leftB->setEnabled( false );
+            leftB->show();
 
-        rightB->setGeometry(scrollButtonRightRect);
-        rightB->setEnabled(last - scrollOffset > scrollRect.x() + scrollRect.width());
-        rightB->show();
+            rightB->setGeometry( scrollButtonRightRect );
+            rightB->setEnabled( last - scrollOffset > scrollRect.x() + scrollRect.width() );
+            rightB->show();
+        }
+
+        // Adsk 3ds Max: Update the new tabs menu button.
+        if ( tabScrollBtnOptions.testFlag( TabMenuBtnShown ) )
+        {
+            tabsMenuBtn->setGeometry( tabsMenuButtonRect );
+            tabsMenuBtn->show();
+        }
+
     } else {
         scrollOffset = 0;
         rightB->hide();
         leftB->hide();
+        tabsMenuBtn->hide(); // Adsk 3ds Max
     }
 
     layoutWidgets();
@@ -606,6 +670,15 @@ QRect QTabBarPrivate::normalizedScrollRect(int index)
     QRect scrollButtonRightRect = q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
     QRect tearLeftRect = q->style()->subElementRect(QStyle::SE_TabBarTearIndicatorLeft, &opt, q);
     QRect tearRightRect = q->style()->subElementRect(QStyle::SE_TabBarTearIndicatorRight, &opt, q);
+    
+    // Adsk 3ds Max
+    // If only the tabs menu button is shown, we use this button as reference
+    // for scroll rect calculation.
+    if ( tabScrollBtnOptions == TabMenuBtnShown )
+    {
+        QRect tabsMenuButtonRect = q->style()->subElementRect( QStyle::SE_TabBarTabsMenuButton, &opt, q );
+        scrollButtonLeftRect = scrollButtonRightRect = tabsMenuButtonRect;
+    }
 
     if (verticalTabs(shape)) {
         int topEdge, bottomEdge;
@@ -677,7 +750,7 @@ int QTabBarPrivate::hoveredTabIndex() const
 void QTabBarPrivate::makeVisible(int index)
 {
     Q_Q(QTabBar);
-    if (!validIndex(index) || leftB->isHidden())
+    if (!validIndex(index) || (leftB->isHidden() && tabsMenuBtn->isHidden()))
         return;
 
     const QRect tabRect = tabList.at(index).rect;
@@ -982,6 +1055,7 @@ int QTabBar::insertTab(int index, const QIcon& icon, const QString &text)
             ++d->tabList[i].lastTab;
     }
 
+    d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
     tabInserted(index);
     d->autoHideTabs();
     return index;
@@ -1074,6 +1148,7 @@ void QTabBar::removeTab(int index)
             }
             update(d->hoverRect);
         }
+        d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
         tabRemoved(index);
     }
 }
@@ -1436,9 +1511,9 @@ QSize QTabBar::minimumSizeHint() const
         return r.size().expandedTo(QApplication::globalStrut());
     }
     if (verticalTabs(d->shape))
-        return QSize(sizeHint().width(), d->rightB->sizeHint().height() * 2 + 75);
+        return QSize( sizeHint().width(), extraButtonWidth( d, this ) + 75 );
     else
-        return QSize(d->rightB->sizeHint().width() * 2 + 75, sizeHint().height());
+        return QSize( extraButtonWidth( d, this ) + 75, sizeHint().height() );
 }
 
 // Compute the most-elided possible text, for minimumSizeHint
@@ -1596,7 +1671,24 @@ bool QTabBar::event(QEvent *event)
     if (event->type() == QEvent::HoverMove
         || event->type() == QEvent::HoverEnter) {
         QHoverEvent *he = static_cast<QHoverEvent *>(event);
-        if (!d->hoverRect.contains(he->pos())) {
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max modification: Tabs menu button
+        // No hover on the tabs when we are on the left/right/tabmenu buttons.
+        //------------------------------------------------------------------
+        if ( isMousePosInCornerButtons( d, he->pos() ) )
+        {
+            // Clear old tab hover rect.
+            if ( d->hoverRect.isValid() )
+            {
+                QRect oldHoverRect = d->hoverRect;
+                d->hoverIndex = -1;
+                d->hoverRect = QRect();
+                update( oldHoverRect );
+            }
+        }
+        else if ( !d->hoverRect.contains( he->pos() ) )
+        {
             QRect oldHoverRect = d->hoverRect;
             bool cursorOverTabs = false;
             for (int i = 0; i < d->tabList.count(); ++i) {
@@ -1660,9 +1752,7 @@ bool QTabBar::event(QEvent *event)
 #endif
     } else if (event->type() == QEvent::MouseButtonDblClick) { // ### fixme Qt 6: move to mouseDoubleClickEvent(), here for BC reasons.
         const QPoint pos = static_cast<const QMouseEvent *>(event)->pos();
-        const bool isEventInCornerButtons = (!d->leftB->isHidden() && d->leftB->geometry().contains(pos))
-                                            || (!d->rightB->isHidden() && d->rightB->geometry().contains(pos));
-        if (!isEventInCornerButtons)
+        if ( !isMousePosInCornerButtons( d, pos ) )
             emit tabBarDoubleClicked(tabAt(pos));
     } else if (event->type() == QEvent::Move) {
         d->updateMacBorderMetrics();
@@ -1688,6 +1778,26 @@ bool QTabBar::event(QEvent *event)
         event->ignore();
 #endif
     }
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    // Sync dynamic 3ds Max property for the tab scroll options with
+    // the internal flag.
+    //------------------------------------------------------------------
+    else if ( event->type() == QEvent::DynamicPropertyChange )
+    {
+        auto pe = static_cast< QDynamicPropertyChangeEvent* >( event );
+        if ( pe->propertyName() == "_3dsmax_tab_scroll_options" )
+        {
+            auto prop = property( "_3dsmax_tab_scroll_options" );
+            if ( prop.isValid())
+            {
+                d->tabScrollBtnOptions = (QTabBarPrivate::TabScrollOptions)prop.toInt();
+                d->refresh();
+            }
+        }
+    }
+ 
+
     return QWidget::event(event);
 }
 
@@ -1793,13 +1903,13 @@ void QTabBar::paintEvent(QPaintEvent *)
     }
 
     // Only draw the tear indicator if necessary. Most of the time we don't need too.
-    if (d->leftB->isVisible() && cutLeft >= 0) {
+    if ( (d->leftB->isVisible() || d->tabsMenuBtn->isVisible()) && cutLeft >= 0) {
         cutTabLeft.rect = rect();
         cutTabLeft.rect = style()->subElementRect(QStyle::SE_TabBarTearIndicatorLeft, &cutTabLeft, this);
         p.drawPrimitive(QStyle::PE_IndicatorTabTearLeft, cutTabLeft);
     }
 
-    if (d->rightB->isVisible() && cutRight >= 0) {
+    if ( (d->rightB->isVisible() || d->tabsMenuBtn->isVisible()) && cutRight >= 0) {
         cutTabRight.rect = rect();
         cutTabRight.rect = style()->subElementRect(QStyle::SE_TabBarTearIndicatorRight, &cutTabRight, this);
         p.drawPrimitive(QStyle::PE_IndicatorTabTearRight, cutTabRight);
@@ -1902,6 +2012,9 @@ void QTabBar::moveTab(int from, int to)
 
     d->layoutWidgets(start);
     update();
+
+    d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
+
     emit tabMoved(from, to);
     if (previousIndex != d->currentIndex)
         emit currentChanged(d->currentIndex);
@@ -1942,9 +2055,8 @@ void QTabBar::mousePressEvent(QMouseEvent *event)
     Q_D(QTabBar);
 
     const QPoint pos = event->pos();
-    const bool isEventInCornerButtons = (!d->leftB->isHidden() && d->leftB->geometry().contains(pos))
-                                     || (!d->rightB->isHidden() && d->rightB->geometry().contains(pos));
-    if (!isEventInCornerButtons) {
+
+    if ( !isMousePosInCornerButtons( d, pos ) ) {
         const int index = d->indexAtPos(pos);
         emit tabBarClicked(index);
     }
@@ -2101,6 +2213,9 @@ void QTabBarPrivate::setupMovableTab()
         leftB->raise();
     if (rightB)
         rightB->raise();
+    if ( tabsMenuBtn ) // Adsk 3ds Max
+        tabsMenuBtn->raise();
+
     movingTab->setVisible(true);
 }
 
@@ -2691,6 +2806,120 @@ void QTabBarPrivate::Tab::TabBarAnimation::updateState(QAbstractAnimation::State
     if (newState == Stopped) priv->moveTabFinished(priv->tabList.indexOf(*tab));
 }
 #endif
+
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Adds a new tool button to the tab left / right scroll buttons
+// which opens up a quick select menu containing all tabs.
+//------------------------------------------------------------------
+TabsMenuBtn::TabsMenuBtn( QTabBar* parent )
+    : QToolButton( parent ), mTabBar( parent )
+{
+    setObjectName( QLatin1String( "_3dsmax_tabbar_tabs_menu_button" ) );
+    setPopupMode( QToolButton::InstantPopup );
+    setArrowType( Qt::DownArrow );
+
+    mTabsMenu = new QMenu( this );
+    setMenu( mTabsMenu );
+
+    QObject::connect( mTabsMenu, &QMenu::triggered, this, &TabsMenuBtn::tabsMenuActionTriggered );
+    QObject::connect( mTabsMenu, &QMenu::aboutToShow, this, &TabsMenuBtn::tabsMenuAboutToShow );
+    QObject::connect( mTabBar, &QTabBar::currentChanged, this, &TabsMenuBtn::currentTabChanged );
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabsMenuActionTriggered( QAction* action )
+{
+    int idx = action->data().toInt();
+
+    if ( idx >= 0 && idx < mTabBar->count() )
+    {
+        mTabBar->setCurrentIndex( idx );
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabsMenuAboutToShow()
+{
+    if ( mTabOrderDirty )
+    {
+        // Update complete menu.
+        updateTabsMenu();
+        mTabOrderDirty = false;
+        mCurTabDirty = false;
+    }
+    else if ( mCurTabDirty )
+    {
+        // Update just current tab selection.
+        // Set a bold font for the current tab menu item.
+        int idx = mTabBar->currentIndex();
+
+        for ( auto a : mTabsMenu->actions() )
+        {
+            QFont f = a->font();
+            f.setBold( a->data().toInt() == idx );
+            a->setFont( f );
+        }
+
+        mCurTabDirty = false;
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::updateTabsMenu()
+{
+    int curIdx = mTabBar->currentIndex();
+    mTabsMenu->clear();
+    
+    for ( int idx = 0; idx < mTabBar->count(); ++idx )
+    {
+        auto tabName = mTabBar->tabText( idx );
+        auto icon = mTabBar->tabIcon( idx );
+        auto action = mTabsMenu->addAction( icon, tabName );
+        action->setData( idx );
+        // Set a bold font for the current tab menu item.
+        if ( idx == curIdx )
+        {
+            QFont f = action->font();
+            f.setBold( true );
+            action->setFont( f );
+        }
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::paintEvent( QPaintEvent* evt )
+{
+    Q_UNUSED( evt );
+    QStylePainter p( this );
+    QStyleOptionToolButton opt;
+    initStyleOption( &opt );
+
+    // Remove menu flag for not showing the little corner triangle.
+    opt.features &= ~QStyleOptionToolButton::HasMenu;
+
+    p.drawComplexControl( QStyle::CC_ToolButton, opt );
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::currentTabChanged()
+{
+    mCurTabDirty = true;
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabOrderChanged()
+{
+    mTabOrderDirty = true;
+}
+
 
 QT_END_NAMESPACE
 

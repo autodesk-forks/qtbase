@@ -1774,7 +1774,15 @@ void QApplicationPrivate::setFocusWidget(QWidget *focus, Qt::FocusReason reason)
         else if (focus && reason == Qt::ShortcutFocusReason) {
             focus->window()->setAttribute(Qt::WA_KeyboardFocusChange);
         }
-        QWidget *prev = focus_widget;
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max change: In 3ds Max we discovered crashes in Qt
+        // when during the focus change widgets that are affected by the change
+        // get deleted. To avoid a crash we keep track of the widgets with
+        // a QPointer and skip the code if the pointer is already a nullptr.
+        //------------------------------------------------------------------
+        QPointer<QWidget> prev = focus_widget;
+        QPointer<QWidget> newFocus = focus;
         focus_widget = focus;
 
         if(focus_widget)
@@ -1791,17 +1799,15 @@ void QApplicationPrivate::setFocusWidget(QWidget *focus, Qt::FocusReason reason)
                 }
 #endif
                 QFocusEvent out(QEvent::FocusOut, reason);
-                QPointer<QWidget> that = prev;
                 QApplication::sendEvent(prev, &out);
-                if (that)
-                    QApplication::sendEvent(that->style(), &out);
+                if (prev)
+                    QApplication::sendEvent(prev->style(), &out);
             }
-            if(focus && QApplicationPrivate::focus_widget == focus) {
+            if(newFocus && QApplicationPrivate::focus_widget == newFocus) {
                 QFocusEvent in(QEvent::FocusIn, reason);
-                QPointer<QWidget> that = focus;
-                QApplication::sendEvent(focus, &in);
-                if (that)
-                    QApplication::sendEvent(that->style(), &in);
+                QApplication::sendEvent(newFocus, &in);
+                if (newFocus)
+                    QApplication::sendEvent(newFocus->style(), &in);
             }
             emit qApp->focusChanged(prev, focus_widget);
         }

@@ -6499,7 +6499,14 @@ void QWidget::setFocus(Qt::FocusReason reason)
     if (!isEnabled())
         return;
 
-    QWidget *f = d_func()->deepestFocusProxy();
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max change: In 3ds Max we discovered crashes in Qt
+    // when during the focus change widgets that are affected by the change
+    // get deleted. To avoid a crash we keep track of the widgets with
+    // a QPointer and quit the function if a tracked widget got deleted
+    // during the focus change.
+    //------------------------------------------------------------------
+    QPointer<QWidget> f = d_func()->deepestFocusProxy();
     if (!f)
         f = this;
 
@@ -6509,6 +6516,8 @@ void QWidget::setFocus(Qt::FocusReason reason)
 #endif
        )
         return;
+
+    QPointer<QWidget> thisPtr = this;
 
 #if QT_CONFIG(graphicsview)
     QWidget *previousProxyFocus = 0;
@@ -6535,7 +6544,7 @@ void QWidget::setFocus(Qt::FocusReason reason)
     }
 #endif
 
-    if (f->isActiveWindow()) {
+    if (f && f->isActiveWindow()) {
         QWidget *prev = QApplicationPrivate::focus_widget;
         if (prev) {
             if (reason != Qt::PopupFocusReason && reason != Qt::MenuBarFocusReason
@@ -6552,6 +6561,16 @@ void QWidget::setFocus(Qt::FocusReason reason)
         f->d_func()->updateFocusChild();
 
         QApplicationPrivate::setFocusWidget(f, reason);
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max change: Tracked widgets has been deleted 
+        // during the focus change.
+        //------------------------------------------------------------------
+        if ( !thisPtr || !f )
+        {
+            return;
+        }
+
 #ifndef QT_NO_ACCESSIBILITY
 # ifdef Q_OS_WIN
         // The negation of the condition in setFocus_sys
@@ -6585,15 +6604,14 @@ void QWidget::setFocus(Qt::FocusReason reason)
 #endif
                     // Send event to self
                     QFocusEvent event(QEvent::FocusIn, reason);
-                    QPointer<QWidget> that = f;
                     QApplication::sendEvent(f, &event);
-                    if (that)
-                        QApplication::sendEvent(that->style(), &event);
+                    if (f)
+                        QApplication::sendEvent(f->style(), &event);
                 }
             }
         }
 #endif
-    } else {
+    } else if ( f ) {
         f->d_func()->updateFocusChild();
     }
 }

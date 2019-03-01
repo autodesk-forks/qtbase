@@ -3631,6 +3631,10 @@ void QMenu::internalDelayedPopup()
     }
 
     d->activeMenu->popup(subMenuPos);
+
+    if (!d->activeMenu) 
+        return;
+
     d->sloppyState.setSubMenuPopup(actionRect, d->currentAction, d->activeMenu);
 
 #if !defined(Q_OS_DARWIN)

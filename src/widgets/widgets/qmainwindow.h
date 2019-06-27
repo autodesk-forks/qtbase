@@ -165,12 +165,15 @@ public:
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget);
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
                        Qt::Orientation orientation);
+    void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
+                       Qt::Orientation orientation, bool toFront);
     void splitDockWidget(QDockWidget *after, QDockWidget *dockwidget,
                          Qt::Orientation orientation);
     void tabifyDockWidget(QDockWidget *first, QDockWidget *second);
     QList<QDockWidget*> tabifiedDockWidgets(QDockWidget *dockwidget) const;
     void removeDockWidget(QDockWidget *dockwidget);
     bool restoreDockWidget(QDockWidget *dockwidget);
+    Q_INVOKABLE void raiseDockWidget(QDockWidget *dockwidget);
 
     Qt::DockWidgetArea dockWidgetArea(QDockWidget *dockwidget) const;
 

@@ -2890,16 +2890,16 @@ QRect QCommonStyle::subElementRect(SubElement sr, const QStyleOption *opt,
                 break;
             default:
                 if (sr == SE_TabBarTabLeftButton)
-                    r = QRect(tab->rect.x() + hpadding, midHeight, w, h);
+                    r = QRect(tab->rect.x() + hpadding, tab->rect.y() + midHeight, w, h);
                 else
-                    r = QRect(tab->rect.right() - w - hpadding, midHeight, w, h);
+                    r = QRect(tab->rect.right() - w - hpadding, tab->rect.y() + midHeight, w, h);
                 r = visualRect(tab->direction, tab->rect, r);
             }
             if (verticalTabs) {
                 if (atTheTop)
-                    r = QRect(midWidth, tr.y() + tab->rect.height() - hpadding - h, w, h);
+                    r = QRect(tab->rect.x() + midWidth, tr.y() + tab->rect.height() - hpadding - h, w, h);
                 else
-                    r = QRect(midWidth, tr.y() + hpadding, w, h);
+                    r = QRect(tab->rect.x() + midWidth, tr.y() + hpadding, w, h);
             }
         }
 

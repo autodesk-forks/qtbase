@@ -136,6 +136,11 @@ public:
     bool layoutDirty;
     bool drawBase;
     int scrollOffset;
+    int lineCount = 0;
+    mutable struct {
+        int width;
+        int height;
+    } heightForWidthCache = { -1, 0 };
 
     //------------------------------------------------------------------
     // Autodesk 3ds Max addition: Tabs menu button
@@ -183,6 +188,9 @@ public:
 #ifndef QT_NO_ACCESSIBILITY
         QString accessibleName;
 #endif
+        int row = -1;
+        int rowIndex = -1;
+        bool isLastTabInRow = false;
 
 #if QT_CONFIG(animation)
         ~Tab() { delete animation; }
@@ -275,6 +283,7 @@ public:
     bool documentMode;
     bool autoHide;
     bool changeCurrentOnDrag;
+    bool multiRow = false; // Adsk 3ds Max
 
     int switchTabCurrentIndex;
     int switchTabTimerId;

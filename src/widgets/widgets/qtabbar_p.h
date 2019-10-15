@@ -140,7 +140,7 @@ public:
     mutable struct {
         int width;
         int height;
-    } heightForWidthCache = { -1, 0 };
+    } heightForWidthCache = { -1, -1 };
 
     //------------------------------------------------------------------
     // Autodesk 3ds Max addition: Tabs menu button

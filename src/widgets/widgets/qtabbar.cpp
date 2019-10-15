@@ -254,9 +254,10 @@ void QTabBarPrivate::initBasicStyleOption(QStyleOptionTab *option, int tabIndex)
     else
         option->selectedPosition = QStyleOptionTab::NotAdjacent;
 
-    const bool paintBeginning = ((multiRow && (tab.rowIndex == 0)) || tabIndex == 0)
+    const bool paintBeginning = ((multiRow && (tab.rowIndex == 0)) || (!multiRow && tabIndex == 0))
             || (dragInProgress && tabIndex == pressedIndex + 1);
-    const bool paintEnd = ((multiRow && tab.isLastTabInRow) || (tabIndex == totalTabs - 1))
+    const bool paintEnd =
+            ((multiRow && tab.isLastTabInRow) || (!multiRow && (tabIndex == totalTabs - 1)))
             || (dragInProgress && tabIndex == pressedIndex - 1);
 
     if (paintBeginning) {
@@ -557,7 +558,7 @@ void QTabBarPrivate::layoutTabs()
                     currentSelRow = row;
                 }
             }
-            maxExtent -= (tabOverlap + 1);
+            maxExtent -= tabOverlap;
         }
 
         // we move the row containing the current tab next to the content
@@ -577,11 +578,6 @@ void QTabBarPrivate::layoutTabs()
 
         for (int r = 0; r < rowTabIndices.count(); ++r) {
             QVector<int> &rowVec = rowTabIndices[r];
-            // We revert the order of the tabs for west to let the tab order
-            // follow the reading direction.
-            if (shape == QTabBar::Shape::RoundedWest || shape == QTabBar::Shape::TriangularWest) {
-                std::reverse(rowVec.begin(), rowVec.end());
-            }
             tabChainIndex = 0;
             QVector<QLayoutStruct> tabChain(rowVec.count() + 2);
             // We put an empty item at the front and back and set its expansive attribute
@@ -1065,7 +1061,9 @@ void QTabBarPrivate::_q_scrollTabs()
 void QTabBarPrivate::refresh()
 {
     Q_Q(QTabBar);
-
+    if (multiRow) {
+        heightForWidthCache = { -1, -1 };
+    }
     // be safe in case a subclass is also handling move with the tabs
     if (pressedIndex != -1
         && movable
@@ -1731,7 +1729,7 @@ int QTabBar::heightForWidth(int width) const
     }
 
     int tabOverlap = style()->pixelMetric(QStyle::PM_TabBarTabOverlap, nullptr, this);
-    totalHeight = qMax(0, ((maxHeight - (tabOverlap + 1)) * rows) + (tabOverlap + 1));
+    totalHeight = qMax(0, ((maxHeight - tabOverlap) * rows) + tabOverlap);
 
     d->heightForWidthCache.width = width;
     d->heightForWidthCache.height = totalHeight;
@@ -1777,7 +1775,7 @@ int QTabBar::widthForHeight(int height) const
     }
 
     int tabOverlap = style()->pixelMetric(QStyle::PM_TabBarTabOverlap, nullptr, this);
-    totalWidth = qMax(0, ((maxWidth - (tabOverlap + 1)) * rows) + (tabOverlap + 1));
+    totalWidth = qMax(0, ((maxWidth - tabOverlap) * rows) + tabOverlap);
 
     d->heightForWidthCache.height = height;
     d->heightForWidthCache.width = totalWidth;

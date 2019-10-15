@@ -736,7 +736,7 @@ void QTabWidget::setTabBar(QTabBar* tb)
     if (d->tabs->tabsClosable())
         connect(d->tabs, SIGNAL(tabCloseRequested(int)),
                 this, SIGNAL(tabCloseRequested(int)));
-    tb->setExpanding(!documentMode());
+    tb->setExpanding(!documentMode() || multiRow());
     setUpLayout();
 }
 
@@ -1370,7 +1370,7 @@ void QTabWidget::setDocumentMode(bool enabled)
 {
     Q_D(QTabWidget);
     d->tabs->setDocumentMode(enabled);
-    d->tabs->setExpanding(!enabled);
+    d->tabs->setExpanding((!enabled) || multiRow());
     d->tabs->setDrawBase(enabled);
     setUpLayout();
 }
@@ -1408,7 +1408,7 @@ bool QTabWidget::multiRow() const
 void QTabWidget::setMultiRow(bool enabled)
 {
     Q_D(QTabWidget);
-    return d->tabs->setMultiRow(enabled);
+    d->tabs->setMultiRow(enabled);
 }
 
 /*!

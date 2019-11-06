@@ -5032,7 +5032,7 @@ QSize QStyleSheetStyle::sizeFromContents(ContentsType ct, const QStyleOption *op
                                        opt->rect, opt->direction);
                 sz += QSize(r.width(), 0);
                 has_rule = true;
-            } else {
+            } else if (has_rule) {
                 QSize defaultUpSize = defaultSize(w, subRule.size(), spinbox->rect, PseudoElement_SpinBoxUpButton);
                 sz += QSize(defaultUpSize.width(), 0);
             }

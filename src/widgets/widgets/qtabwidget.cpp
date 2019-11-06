@@ -321,7 +321,15 @@ void QTabWidget::initStyleOption(QStyleOptionTabWidgetFrame *option) const
     int exth = style()->pixelMetric(QStyle::PM_TabBarBaseHeight, 0, this);
     QSize t(0, d->stack->frameWidth());
     if (d->tabs->isVisibleTo(const_cast<QTabWidget *>(this))) {
-        t = d->tabs->sizeHint();
+        if (d->tabs->multiRow()) {
+            if (d->pos == QTabWidget::North || d->pos == QTabWidget::South) {
+                t = QSize(width(), d->tabs->heightForWidth(width()));
+            } else {
+                t = QSize(d->tabs->widthForHeight(height()), height());
+            }
+        } else {
+            t = d->tabs->sizeHint();
+        }
         if (documentMode()) {
             if (tabPosition() == East || tabPosition() == West) {
                 t.setHeight(height());
@@ -728,7 +736,7 @@ void QTabWidget::setTabBar(QTabBar* tb)
     if (d->tabs->tabsClosable())
         connect(d->tabs, SIGNAL(tabCloseRequested(int)),
                 this, SIGNAL(tabCloseRequested(int)));
-    tb->setExpanding(!documentMode());
+    tb->setExpanding(!documentMode() || multiRow());
     setUpLayout();
 }
 
@@ -1362,7 +1370,7 @@ void QTabWidget::setDocumentMode(bool enabled)
 {
     Q_D(QTabWidget);
     d->tabs->setDocumentMode(enabled);
-    d->tabs->setExpanding(!enabled);
+    d->tabs->setExpanding((!enabled) || multiRow());
     d->tabs->setDrawBase(enabled);
     setUpLayout();
 }
@@ -1388,6 +1396,19 @@ void QTabWidget::setTabBarAutoHide(bool enabled)
 {
     Q_D(QTabWidget);
     return d->tabs->setAutoHide(enabled);
+}
+
+
+bool QTabWidget::multiRow() const
+{
+    Q_D(const QTabWidget);
+    return d->tabs->multiRow();
+}
+
+void QTabWidget::setMultiRow(bool enabled)
+{
+    Q_D(QTabWidget);
+    d->tabs->setMultiRow(enabled);
 }
 
 /*!

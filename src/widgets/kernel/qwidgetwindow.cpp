@@ -237,7 +237,30 @@ bool QWidgetWindow::event(QEvent *event)
     switch (event->type()) {
     case QEvent::Close:
         handleCloseEvent(static_cast<QCloseEvent *>(event));
-        QWindow::event(event);
+        //-------------------------------------------------------------------------
+        // Autodesk 3ds Max change: This newly introduced code line causes a lot of 
+        // troubles on 3ds Max side, so we comment it out again.
+        // 1. Dock widgets that have the native tool window frame are not dockable 
+        // anymore when you close and reopen a floating dock widget via the OS 
+        // titlebar close button or sysmenu. This is due to the fact that 
+        // setFrameStrutEventsEnabled() is not called on the newly created 
+        // platform window when the dock widget gets shown again. Without framestrut 
+        // enabled the nonclientarea events on Qt side won't work and the dock widget 
+        // drag is not started.
+        // 2. It also plays not well with a mixed qt/win32 window hierarchy, cause 
+        // with this change the complete native window hierarchy gets now deleted 
+        // before the widget hierarchy, even hwnds that get hosted in a QWinHost are 
+        // now gone before the widgets client code is actually reached. This caused 
+        // crashes in 3ds Max where the Qt widget still tried to work on a hosted 
+        // native win32 child window.
+        // 3. Another issue is, that widgets that do not have the Qt::WA_DeleteOnClose 
+        // flag set, cannot be shown again when they get closed via the native OS 
+        // titlebar. This seems to be due to the fact that QWidgetPrivate::show_sys() 
+        // is doing nothing cause the Qt::WA_OutsideWSRange flag is set. It gets set 
+        // by QWidget::setVisible() during the layout->active() call, cause 
+        // mw->setMaximumSize(totalMaximumSize()) is setting a total max height of 0.
+        //-------------------------------------------------------------------------
+        //QWindow::event(event);
         return true;
 
     case QEvent::Enter:
@@ -721,6 +744,31 @@ bool QWidgetWindow::updatePos()
     bool changed = false;
     if (m_widget->testAttribute(Qt::WA_OutsideWSRange))
         return changed;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Addition:  Since we have a lot of legacy code that rely
+    // on a fixed HWND parent hierarchy, we sometimes are forced to use a mixed
+    // native / non-native QWidget parent chain. In these cases the QWindow and
+    // the QWidget positions may not always match - depending on the in-between
+    // non-native parent chain - like in scroll-areas, e.g.
+    //-------------------------------------------------------------------------
+    if ( m_widget->testAttribute( Qt::WA_NativeWindow ) )
+    {
+        QWidget* np = m_widget->nativeParentWidget();
+        QWidget* p = m_widget->parentWidget();
+        if ( np && p && ( np != p ) )
+        {
+            QPoint top_left_calculated = p->mapTo( np, m_widget->data->crect.topLeft() );
+            QPoint top_left = geometry().topLeft();
+            if( top_left_calculated != top_left )
+            {
+                changed = true;
+                //m_widget->data->crect.moveTopLeft( p->mapFrom( np, geometry().topLeft() ) );
+            }
+            updateMargins();
+            return changed;
+        }
+    }
+    //-------------------------------------------------------------------------
     if (m_widget->data->crect.topLeft() != geometry().topLeft()) {
         changed = true;
         m_widget->data->crect.moveTopLeft(geometry().topLeft());

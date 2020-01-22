@@ -356,6 +356,11 @@ public:
         SE_TabBarScrollRightButton,
         SE_TabBarTearIndicatorRight,
 
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        //------------------------------------------------------------------
+        SE_TabBarTabsMenuButton,
+
         // do not add any values below/greater than this
         SE_CustomBase = 0xf0000000
     };
@@ -573,6 +578,11 @@ public:
 
         PM_TitleBarButtonIconSize,
         PM_TitleBarButtonSize,
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        //------------------------------------------------------------------
+        PM_TabBarTabsMenuButtonWidth,
 
         // do not add any values below/greater than this
         PM_CustomBase = 0xf0000000

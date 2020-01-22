@@ -231,7 +231,7 @@ LRESULT QT_WIN_CALLBACK qt_internal_proc(HWND hwnd, UINT message, WPARAM wp, LPA
     }
     case WM_TIMER:
         if (d->sendPostedEventsWindowsTimerId == 0
-            || wp != uint(d->sendPostedEventsWindowsTimerId)) {
+            || wp != static_cast<UINT_PTR>(d->sendPostedEventsWindowsTimerId)) {
             Q_ASSERT(d != 0);
             d->sendTimerEvent(wp);
             return 0;

@@ -26,3 +26,5 @@ egl_headers.files = \
     $$ANGLE_DIR/include/EGL/eglplatform.h
 egl_headers.path = $$[QT_INSTALL_HEADERS]/QtANGLE/EGL
 INSTALLS += egl_headers
+
+RC_FILE = $$ANGLE_DIR/src/libEGL/libEGL.rc

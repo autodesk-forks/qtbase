@@ -2898,16 +2898,16 @@ QRect QCommonStyle::subElementRect(SubElement sr, const QStyleOption *opt,
                 break;
             default:
                 if (sr == SE_TabBarTabLeftButton)
-                    r = QRect(tab->rect.x() + hpadding, midHeight, w, h);
+                    r = QRect(tab->rect.x() + hpadding, tab->rect.y() + midHeight, w, h);
                 else
-                    r = QRect(tab->rect.right() - w - hpadding, midHeight, w, h);
+                    r = QRect(tab->rect.right() - w - hpadding, tab->rect.y() + midHeight, w, h);
                 r = visualRect(tab->direction, tab->rect, r);
             }
             if (verticalTabs) {
                 if (atTheTop)
-                    r = QRect(midWidth, tr.y() + tab->rect.height() - hpadding - h, w, h);
+                    r = QRect(tab->rect.x() + midWidth, tr.y() + tab->rect.height() - hpadding - h, w, h);
                 else
-                    r = QRect(midWidth, tr.y() + hpadding, w, h);
+                    r = QRect(tab->rect.x() + midWidth, tr.y() + hpadding, w, h);
             }
         }
 
@@ -2935,22 +2935,69 @@ QRect QCommonStyle::subElementRect(SubElement sr, const QStyleOption *opt,
             r = visualRect(opt->direction, opt->rect, r);
         }
         break;
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    // Adds a sub element rectangle for the new 3ds Max tabs menu button.
+    // The button is placed by default on the right side of the tab scroll buttons.
+    //------------------------------------------------------------------
+    case SE_TabBarTabsMenuButton: {
+        const bool vertical = opt->rect.width() < opt->rect.height();
+        const Qt::LayoutDirection ld = widget ? widget->layoutDirection() : Qt::LeftToRight;
+        const int tabsMenuBtnWidth = qMax( proxy()->pixelMetric( QStyle::PM_TabBarTabsMenuButtonWidth, 0, widget ), QApplication::globalStrut().width() );
+
+        r = vertical ? QRect( 0, opt->rect.height() - tabsMenuBtnWidth, opt->rect.width(), tabsMenuBtnWidth )
+            : QStyle::visualRect( ld, opt->rect, QRect( opt->rect.width() - tabsMenuBtnWidth, 0, tabsMenuBtnWidth, opt->rect.height() ) );
+        break;
+    }
     case SE_TabBarScrollLeftButton: {
         const bool vertical = opt->rect.width() < opt->rect.height();
-        const Qt::LayoutDirection ld = widget->layoutDirection();
+        const Qt::LayoutDirection ld = widget ? widget->layoutDirection() : Qt::LeftToRight;
         const int buttonWidth = qMax(proxy()->pixelMetric(QStyle::PM_TabBarScrollButtonWidth, nullptr, widget), QApplication::globalStrut().width());
         const int buttonOverlap = proxy()->pixelMetric(QStyle::PM_TabBar_ScrollButtonOverlap, nullptr, widget);
 
-        r = vertical ? QRect(0, opt->rect.height() - (buttonWidth * 2) + buttonOverlap, opt->rect.width(), buttonWidth)
-            : QStyle::visualRect(ld, opt->rect, QRect(opt->rect.width() - (buttonWidth * 2) + buttonOverlap, 0, buttonWidth, opt->rect.height()));
+        int buttonArea = 2 * buttonWidth - buttonOverlap;
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        // Check the 3ds Max property for the tab scroll options if the
+        // tabs menu button is shown.
+        //------------------------------------------------------------------
+        if ( widget )
+        {
+            auto prop = widget->property( "_3dsmax_tab_scroll_options" );
+            if ( prop.isValid() && prop.toInt() > 1 )
+            {
+                const int tabsMenuBtnWidth = qMax( proxy()->pixelMetric( QStyle::PM_TabBarTabsMenuButtonWidth, 0, widget ), QApplication::globalStrut().width() );
+                buttonArea += tabsMenuBtnWidth - buttonOverlap;
+            }
+        }
+
+        r = vertical ? QRect(0, opt->rect.height() - buttonArea, opt->rect.width(), buttonWidth)
+            : QStyle::visualRect(ld, opt->rect, QRect(opt->rect.width() - buttonArea, 0, buttonWidth, opt->rect.height()));
         break; }
     case SE_TabBarScrollRightButton: {
         const bool vertical = opt->rect.width() < opt->rect.height();
-        const Qt::LayoutDirection ld = widget->layoutDirection();
+        const Qt::LayoutDirection ld = widget ? widget->layoutDirection() : Qt::LeftToRight;
         const int buttonWidth = qMax(proxy()->pixelMetric(QStyle::PM_TabBarScrollButtonWidth, nullptr, widget), QApplication::globalStrut().width());
+        const int buttonOverlap = proxy()->pixelMetric( QStyle::PM_TabBar_ScrollButtonOverlap, nullptr, widget );
 
-        r = vertical ? QRect(0, opt->rect.height() - buttonWidth, opt->rect.width(), buttonWidth)
-            : QStyle::visualRect(ld, opt->rect, QRect(opt->rect.width() - buttonWidth, 0, buttonWidth, opt->rect.height()));
+        int buttonArea = buttonWidth;
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        // Check the 3ds Max property for the tab scroll options if the
+        // tabs menu button is shown.
+        //------------------------------------------------------------------
+        if ( widget )
+        {
+            auto prop = widget->property( "_3dsmax_tab_scroll_options" );
+            if ( prop.isValid() && prop.toInt() > 1 )
+            {
+                const int tabsMenuBtnWidth = qMax( proxy()->pixelMetric( QStyle::PM_TabBarTabsMenuButtonWidth, 0, widget ), QApplication::globalStrut().width() );
+                buttonArea += tabsMenuBtnWidth - buttonOverlap;
+            }
+        }
+
+        r = vertical ? QRect( 0, opt->rect.height() - buttonArea, opt->rect.width(), buttonWidth )
+            : QStyle::visualRect( ld, opt->rect, QRect(opt->rect.width() - buttonArea, 0, buttonWidth, opt->rect.height()) );
         break; }
 #endif
     case SE_TreeViewDisclosureItem:
@@ -4769,6 +4816,12 @@ int QCommonStyle::pixelMetric(PixelMetric m, const QStyleOption *opt, const QWid
         break;
     case PM_TabBarScrollButtonWidth:
         ret = int(QStyleHelper::dpiScaled(16, opt));
+        break;
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    //------------------------------------------------------------------
+    case PM_TabBarTabsMenuButtonWidth:
+        ret = proxy()->pixelMetric( PM_TabBarScrollButtonWidth, opt, widget );
         break;
     case PM_LayoutLeftMargin:
     case PM_LayoutTopMargin:

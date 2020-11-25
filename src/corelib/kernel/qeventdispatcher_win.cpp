@@ -602,7 +602,18 @@ bool QEventDispatcherWin32::processEvents(QEventLoop::ProcessEventsFlags flags)
                     return false;
                 }
 
-                if (!filterNativeEvent(QByteArrayLiteral("windows_generic_MSG"), &msg, 0)) {
+                // 3ds Max extension: Emit a signal that allows 3ds Max to do it's specific message preprocessing
+                // before Qt translates and dispatches the message. If 3ds Max already processed the message, 
+                // there is no need to propagate / dispatch it further by Qt.
+                // Note, that 3ds Max cannot use the native event filter mechanism below for doing it's message 
+                // preprocessing, since filterNativeEvent() with the event type "windows_generic_MSG" is also used 
+                // by the QWindowsContext::windowsProc().
+                // Getting called twice from two different locations without be able to do a proper distinction of
+                // the calling source on the 3ds Max side, can lead to endless loops causing stack overflows.
+                bool eventProcessed = false;
+                emit preProcessNativeEvent( &msg, &eventProcessed );
+
+                if ( !eventProcessed && !filterNativeEvent(QByteArrayLiteral("windows_generic_MSG"), &msg, 0)) {
                     TranslateMessage(&msg);
                     DispatchMessage(&msg);
                 }
@@ -630,6 +641,9 @@ bool QEventDispatcherWin32::processEvents(QEventLoop::ProcessEventsFlags flags)
             }
         }
     } while (canWait);
+
+    // 3ds Max extension for triggering progressive rendering.
+    emit allEventsProcessed();
 
     return retVal;
 }

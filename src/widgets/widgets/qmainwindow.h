@@ -169,6 +169,8 @@ public:
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget);
     void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
                        Qt::Orientation orientation);
+    void addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget,
+                       Qt::Orientation orientation, bool toFront);
     void splitDockWidget(QDockWidget *after, QDockWidget *dockwidget,
                          Qt::Orientation orientation);
 #if QT_CONFIG(tabbar)
@@ -177,6 +179,7 @@ public:
 #endif
     void removeDockWidget(QDockWidget *dockwidget);
     bool restoreDockWidget(QDockWidget *dockwidget);
+    Q_INVOKABLE void raiseDockWidget(QDockWidget *dockwidget);
 
     Qt::DockWidgetArea dockWidgetArea(QDockWidget *dockwidget) const;
 

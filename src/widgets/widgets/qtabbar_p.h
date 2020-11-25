@@ -70,6 +70,38 @@ QT_REQUIRE_CONFIG(tabbar);
 
 QT_BEGIN_NAMESPACE
 
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Adds a new tool button to the tab left / right scroll buttons
+// which opens up a quick select menu containing all tabs.
+//------------------------------------------------------------------
+class TabsMenuBtn : public QToolButton
+{
+    Q_OBJECT
+
+public:
+    TabsMenuBtn( QTabBar* parent = nullptr );
+
+    void tabOrderChanged();
+    void updateTabsMenu();
+
+protected:
+    void paintEvent( QPaintEvent* evt ) Q_DECL_OVERRIDE;
+
+public slots:
+    void tabsMenuActionTriggered( QAction* action );
+    void tabsMenuAboutToShow();
+    void currentTabChanged();
+
+private:
+    QMenu* mTabsMenu = nullptr;
+    QTabBar* mTabBar = nullptr;
+    bool mTabOrderDirty = true;
+    bool mCurTabDirty = true;
+};
+
+
 class QMovableTabWidget : public QWidget
 {
 public:
@@ -103,6 +135,25 @@ public:
     bool layoutDirty;
     bool drawBase;
     int scrollOffset;
+    int lineCount = 0;
+    mutable struct {
+        int width;
+        int height;
+    } heightForWidthCache = { -1, -1 };
+
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    // Specifies additional flags that can be used to show / hide the
+    // left & right tab scroll buttons in combination with 
+    // the new tabs menu button.
+    //------------------------------------------------------------------
+    enum TabScrollOption {
+        TabScrollBtnsShown = 0x00001,
+        TabMenuBtnShown = 0x00002
+    };
+
+    Q_DECLARE_FLAGS( TabScrollOptions, TabScrollOption )
+
 
     struct Tab {
         inline Tab(const QIcon &ico, const QString &txt)
@@ -137,6 +188,9 @@ public:
 #ifndef QT_NO_ACCESSIBILITY
         QString accessibleName;
 #endif
+        int row = -1;
+        int rowIndex = -1;
+        bool isLastTabInRow = false;
 
 #if QT_CONFIG(animation)
         ~Tab() { delete animation; }
@@ -190,6 +244,7 @@ public:
 
     QToolButton* rightB; // right or bottom
     QToolButton* leftB; // left or top
+    TabsMenuBtn* tabsMenuBtn = nullptr; // Adsk 3ds Max: Tab switch menu button
 
     void _q_scrollTabs();
     void _q_closeTab();
@@ -217,6 +272,7 @@ public:
     bool elideModeSetByUser;
     bool useScrollButtons;
     bool useScrollButtonsSetByUser;
+    TabScrollOptions tabScrollBtnOptions = TabMenuBtnShown; // Adsk 3ds Max
 
     bool expanding;
     bool closeButtonOnTabs;
@@ -229,6 +285,7 @@ public:
     bool documentMode;
     bool autoHide;
     bool changeCurrentOnDrag;
+    bool multiRow = false; // Adsk 3ds Max
 
     int switchTabCurrentIndex;
     int switchTabTimerId;

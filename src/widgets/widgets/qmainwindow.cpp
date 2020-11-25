@@ -1097,6 +1097,20 @@ bool QMainWindow::restoreDockWidget(QDockWidget *dockwidget)
     return d_func()->layout->restoreDockWidget(dockwidget);
 }
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+/*!
+    Raises \a dockwidget, if that \a dockWidget is tabbed together with other
+    dockwidgets, so that after calling this function the \a dockWidget is the
+    current one of the tabbed ones.
+*/
+//-------------------------------------------------------------------------
+void QMainWindow::raiseDockWidget(QDockWidget *dockwidget)
+{
+    d_func()->layout->activate(); // make sure the tabs are in place.
+    d_func()->layout->raise(dockwidget);
+}
+
 /*!
     Adds \a dockwidget into the given \a area in the direction
     specified by the \a orientation.
@@ -1110,6 +1124,26 @@ void QMainWindow::addDockWidget(Qt::DockWidgetArea area, QDockWidget *dockwidget
     // add a window to an area, placing done relative to the previous
     d_func()->layout->addDockWidget(area, dockwidget, orientation);
 }
+
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Addition
+/*!
+    Adds \a dockwidget into the given \a area in the direction
+    specified by the \a orientation.
+    By setting \a toFront to true, the \a dockwidget is placed at the front
+    of the docking area container instead of appending it to the end, which
+    corresponds to the default behavior.
+*/
+//-------------------------------------------------------------------------
+void QMainWindow::addDockWidget( Qt::DockWidgetArea area, QDockWidget *dockwidget,
+    Qt::Orientation orientation, bool toFront )
+{
+    if ( !checkDockWidgetArea( area, "QMainWindow::addDockWidget" ) )
+        return;
+
+    d_func()->layout->addDockWidget( area, dockwidget, orientation, toFront );
+}
+
 
 /*!
     \fn void QMainWindow::splitDockWidget(QDockWidget *first, QDockWidget *second, Qt::Orientation orientation)

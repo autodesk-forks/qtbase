@@ -313,8 +313,19 @@ void Win32MakefileGenerator::processRcFileVar()
         QTextStream ts(&rcString, QFile::WriteOnly);
 
         QStringList vers = project->first("VERSION").toQString().split(".", Qt::SkipEmptyParts);
+
+        //---------------------------------------------------------------------
+        // Autodesk 3ds Max Addition:
+        // Qt defaults to "0" here, what we use for 3ds Max Release, but change
+        // that to "1" for update 1, "2" for update 2. "3" for update 3, etc.
+        // This is needed to allow the patch scripts to replace the dlls with
+        // the newer version during the update installation.
+        // "5.15.1.0" -> "5.15.1.*"
+        //---------------------------------------------------------------------
         for (int i = vers.size(); i < 4; i++)
-            vers += "0";
+        {
+            vers += "0"; //for 3ds Max 
+        }
         QString versionString = vers.join('.');
 
         QStringList rcIcons;

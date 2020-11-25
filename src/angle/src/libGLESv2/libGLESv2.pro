@@ -10,3 +10,5 @@ TARGET = $$qtLibraryTarget($${LIBGLESV2_NAME})
 } else {
     DEFINES += DllMain=DllMain_ANGLE # prevent symbol from conflicting with the user's DllMain
 }
+
+RC_FILE = $$ANGLE_DIR/src/libGLESv2/libGLESv2.rc

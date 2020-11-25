@@ -194,6 +194,7 @@ struct QWExtra {
     uint inRenderWithPainter : 1;
     uint hasMask : 1;
     uint hasWindowContainer : 1;
+    uint hasNativeChildren : 1; // Autodesk 3ds Max Addition
 };
 
 /*!
@@ -538,6 +539,18 @@ public:
     {
         return extra ? extra->nativeChildrenForced : false;
     }
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Addition:  Since we have a lot of legacy code that rely
+    // on a fixed HWND parent hierarchy, we sometimes are forced to use a mixed
+    // native / non-native QWidget parent chain. In these cases the QWidget 
+    // movement has to be propagated to the child chain, to ensure the correct 
+    // positioning of the underlying native QWindow, even if the direct parent 
+    // QWindow was not moved.
+    //-------------------------------------------------------------------------
+    static bool propagateRaisedLoweredToChildren( QWidget*, bool raised );
+    static bool propagateMoveToChildren( QWidget* widget, QPoint offset );
+    //-------------------------------------------------------------------------
 
     inline QRect effectiveRectFor(const QRegion &region) const
     {

@@ -254,8 +254,31 @@ bool QWidgetWindow::event(QEvent *event)
         // The widget might be deleted in the close event handler.
         QPointer<QObject> guard = this;
         handleCloseEvent(static_cast<QCloseEvent *>(event));
-        if (guard)
-            QWindow::event(event);
+        //-------------------------------------------------------------------------
+        // Autodesk 3ds Max change: This newly introduced code line causes a lot of 
+        // troubles on 3ds Max side, so we comment it out again.
+        // 1. Dock widgets that have the native tool window frame are not dockable 
+        // anymore when you close and reopen a floating dock widget via the OS 
+        // titlebar close button or sysmenu. This is due to the fact that 
+        // setFrameStrutEventsEnabled() is not called on the newly created 
+        // platform window when the dock widget gets shown again. Without framestrut 
+        // enabled the nonclientarea events on Qt side won't work and the dock widget 
+        // drag is not started.
+        // 2. It also plays not well with a mixed qt/win32 window hierarchy, cause 
+        // with this change the complete native window hierarchy gets now deleted 
+        // before the widget hierarchy, even hwnds that get hosted in a QWinHost are 
+        // now gone before the widgets client code is actually reached. This caused 
+        // crashes in 3ds Max where the Qt widget still tried to work on a hosted 
+        // native win32 child window.
+        // 3. Another issue is, that widgets that do not have the Qt::WA_DeleteOnClose 
+        // flag set, cannot be shown again when they get closed via the native OS 
+        // titlebar. This seems to be due to the fact that QWidgetPrivate::show_sys() 
+        // is doing nothing cause the Qt::WA_OutsideWSRange flag is set. It gets set 
+        // by QWidget::setVisible() during the layout->active() call, cause 
+        // mw->setMaximumSize(totalMaximumSize()) is setting a total max height of 0.
+        //-------------------------------------------------------------------------
+        // if (guard)
+        //     QWindow::event(event);
         return true;
     }
 

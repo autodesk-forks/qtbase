@@ -69,7 +69,7 @@ void QFocusFramePrivate::update()
     Q_Q(QFocusFrame);
     q->setParent(frameParent);
     updateSize();
-    if (q->parentWidget()->rect().intersects(q->geometry())) {
+    if (q->parentWidget() && q->parentWidget()->rect().intersects(q->geometry())) {
         if (showFrameAboveWidget)
             q->raise();
         else
@@ -91,7 +91,7 @@ void QFocusFramePrivate::updateSize()
     int vmargin = q->style()->pixelMetric(QStyle::PM_FocusFrameVMargin, &opt),
         hmargin = q->style()->pixelMetric(QStyle::PM_FocusFrameHMargin, &opt);
     QPoint pos(widget->x(), widget->y());
-    if (q->parentWidget() != widget->parentWidget())
+    if (q->parentWidget() && widget->parentWidget() && q->parentWidget() != widget->parentWidget())
         pos = widget->parentWidget()->mapTo(q->parentWidget(), pos);
     QRect geom(pos.x()-hmargin, pos.y()-vmargin,
                widget->width()+(hmargin*2), widget->height()+(vmargin*2));
@@ -203,7 +203,7 @@ QFocusFrame::setWidget(QWidget *widget)
             p = p->parentWidget();
         }while (p);
     }
-    if (widget && !widget->isWindow() && widget->parentWidget()->windowType() != Qt::SubWindow) {
+    if (widget && !widget->isWindow() && (widget->parentWidget() && widget->parentWidget()->windowType() != Qt::SubWindow)) {
         d->widget = widget;
         d->widget->installEventFilter(this);
         QWidget *p = widget->parentWidget();

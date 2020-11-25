@@ -66,6 +66,7 @@ class QSpinBox;
 class QDoubleSpinBox;
 class QDial;
 class QAccessibleLineEdit;
+class QAccessibleSpinBoxButton;
 
 #if QT_CONFIG(spinbox)
 class QAccessibleAbstractSpinBox:
@@ -79,6 +80,9 @@ public:
     virtual ~QAccessibleAbstractSpinBox();
 
     QString text(QAccessible::Text t) const override;
+    int childCount() const override; 
+    QAccessibleInterface* child(int idx) const override;
+    int indexOfChild(const QAccessibleInterface *child) const override;
     void *interface_cast(QAccessible::InterfaceType t) override;
 
     // QAccessibleValueInterface
@@ -117,8 +121,12 @@ public:
 protected:
     QAbstractSpinBox *abstractSpinBox() const;
     QAccessibleInterface *lineEditIface() const;
+    QAccessibleInterface *buttonUpIface() const;
+    QAccessibleInterface *buttonDownIface() const;
 private:
     mutable QAccessibleLineEdit *lineEdit;
+    mutable QAccessibleSpinBoxButton* buttonUp;
+    mutable QAccessibleSpinBoxButton* buttonDown;
 };
 
 class QAccessibleSpinBox : public QAccessibleAbstractSpinBox

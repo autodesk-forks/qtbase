@@ -109,6 +109,7 @@ public:
     QList<int> movingSeparator;
     QPoint movingSeparatorOrigin, movingSeparatorPos;
     QBasicTimer separatorMoveTimer;
+    bool shiftMoveSeparator = false; // Autodesk 3ds Max addition: Separator moved while shift pressed
 
     bool startSeparatorMove(const QPoint &pos);
     bool separatorMove(const QPoint &pos);
@@ -222,7 +223,10 @@ bool QMainWindowLayoutSeparatorHelper<Layout>::windowEvent(QEvent *event)
         adjustCursor(QPoint(0, 0));
         return true;
     case QEvent::ShortcutOverride: // when a menu pops up
-        adjustCursor(QPoint(0, 0));
+        if ( movingSeparator.isEmpty() ) // ADSK: Don't revert the cursor if we move a separator and a key is pressed.
+        {
+            adjustCursor( QPoint( 0, 0 ) );
+        }
         break;
 #endif // QT_CONFIG(cursor)
 
@@ -321,6 +325,67 @@ bool QMainWindowLayoutSeparatorHelper<Layout>::separatorMove(const QPoint &pos)
     if (movingSeparator.isEmpty())
         return false;
     movingSeparatorPos = pos;
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Extended docking resize behavior
+    // A drag move separator will now just do a single sided resizing of one
+    // layout item and keep the size of the layout item on the other side of
+    // the separator. The space that it needs for growing/shrinking will be
+    // taken from the center docking area.
+    //
+    // A shift+drag move separator will do the common Qt two sided resizing
+    // where on both sides of the separator one item will grow and the other
+    // one shrink. When the dragging is done in direction of the center docking
+    // area and all items in that direction has been already shrunk to their
+    // minimum size, then dragging doesn't get stuck as used to be, instead it
+    // will continue and move the shrunken items into the center docking area.
+    //-------------------------------------------------------------------------
+    auto prop = layout()->layoutState.mainWindow->property( "_3dsmax_disable_extended_docking_resize" );
+    if ( !prop.isValid() || prop.toBool() == false )
+    {
+        if ( movingSeparator.count() > 1 )
+        {
+            int firstIndex = movingSeparator.first();
+            Qt::Orientation o = firstIndex == QInternal::LeftDock || firstIndex == QInternal::RightDock
+                ? Qt::Horizontal
+                : Qt::Vertical;
+
+            QDockAreaLayoutInfo* info = layout()->dockAreaLayoutInfo()->info( movingSeparator );
+
+            // Extended resizing only if the affected layout info shares the same orientation
+            // as the master dock area.
+            if ( info && info->o == o )
+            {
+                // If the shift state changes, we start with a new 'fresh' move again, cause shift
+                // toggling between single-/two-sided separator resize during the move won't work.
+                Qt::KeyboardModifiers keyMods = QGuiApplication::queryKeyboardModifiers();
+                if ( (keyMods == Qt::ShiftModifier) != shiftMoveSeparator )
+                {
+                    shiftMoveSeparator = !shiftMoveSeparator;
+
+                    // As move origin update we take the moved separators center.
+                    QPoint sepCenter = layout()->dockAreaLayoutInfo()->separatorRect( movingSeparator ).center();
+
+                    if ( o == Qt::Horizontal )
+                    {
+                        movingSeparatorOrigin = QPoint( sepCenter.x(), movingSeparatorOrigin.y() );
+                    }
+                    else
+                    {
+                        movingSeparatorOrigin = QPoint( movingSeparatorOrigin.x(), sepCenter.y() );
+                    }
+
+                    // Update the saved layout state, from which the separator move calculation
+                    // starts on the timer event, to the current layoutState. This will be our new
+                    // starting point for the calculation.
+                    layout()->savedState.clear();
+                    layout()->savedState = layout()->layoutState;
+                }
+            }
+        }
+    }
+    //-------------------------------------------------------------------------
+
     separatorMoveTimer.start(0, window());
     return true;
 }
@@ -331,6 +396,7 @@ bool QMainWindowLayoutSeparatorHelper<Layout>::endSeparatorMove(const QPoint &)
         return false;
     movingSeparator.clear();
     layout()->savedState.clear();
+    shiftMoveSeparator = false;
     return true;
 }
 
@@ -494,9 +560,14 @@ public:
 #if QT_CONFIG(dockwidget)
     void setCorner(Qt::Corner corner, Qt::DockWidgetArea area);
     Qt::DockWidgetArea corner(Qt::Corner corner) const;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+    // makes it possible to add a dock widget to the front of the dock area 
+    // container so that the widget can appear close to the main windows center area.
+    //-------------------------------------------------------------------------
     void addDockWidget(Qt::DockWidgetArea area,
                        QDockWidget *dockwidget,
-                       Qt::Orientation orientation);
+                       Qt::Orientation orientation, bool toFront = false);
     void splitDockWidget(QDockWidget *after,
                          QDockWidget *dockwidget,
                          Qt::Orientation orientation);

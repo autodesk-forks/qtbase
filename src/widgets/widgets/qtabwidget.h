@@ -66,6 +66,7 @@ class Q_WIDGETS_EXPORT QTabWidget : public QWidget
     Q_PROPERTY(bool tabsClosable READ tabsClosable WRITE setTabsClosable)
     Q_PROPERTY(bool movable READ isMovable WRITE setMovable)
     Q_PROPERTY(bool tabBarAutoHide READ tabBarAutoHide WRITE setTabBarAutoHide)
+    Q_PROPERTY(bool multiRow READ multiRow WRITE setMultiRow)
 
 public:
     explicit QTabWidget(QWidget *parent = nullptr);
@@ -145,6 +146,9 @@ public:
 
     bool tabBarAutoHide() const;
     void setTabBarAutoHide(bool enabled);
+
+    bool multiRow() const;
+    void setMultiRow(bool multiRow);
 
     void clear();
 

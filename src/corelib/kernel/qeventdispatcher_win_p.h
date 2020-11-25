@@ -106,6 +106,16 @@ public:
 
     HWND internalHwnd();
 
+Q_SIGNALS:
+
+    // 3ds Max extension for win32 message preprocessing.
+    // Emitted before the native event filter are called and the win32 message gets translated/dispatched. 
+    void preProcessNativeEvent( void* message, bool* returnProcessed );
+
+    // 3ds Max extension for progressive rendering.
+    // Emitted after all win32 messages has been dispatched.
+    void allEventsProcessed();
+
 protected:
     QEventDispatcherWin32(QEventDispatcherWin32Private &dd, QObject *parent = 0);
     virtual void sendPostedEvents();

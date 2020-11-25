@@ -296,7 +296,20 @@ bool QDockWidgetLayout::wmSupportsNativeWindowDeco()
  */
 bool QDockWidgetLayout::nativeWindowDeco(bool floating) const
 {
-    return wmSupportsNativeWindowDeco() && floating && item_list.at(QDockWidgetLayout::TitleBar) == 0;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: 3ds Max uses in the docked version a custom 
+    // titlebar widget and in floating mode the native window frame.
+    // In floating mode the custom titlebar widget gets hidden so we don't
+    // do the custom titlebar widget check here to determine if the window
+    // should have native window decoration.
+    //-------------------------------------------------------------------------
+    if ( floating && parentWidget() && parentWidget()->property( "_3dsmax_hide_titlebar_on_floating" ).toBool() )
+    {
+        return wmSupportsNativeWindowDeco();
+    }
+    //-------------------------------------------------------------------------
+
+    return wmSupportsNativeWindowDeco() && floating && item_list.at( QDockWidgetLayout::TitleBar ) == 0;
 }
 
 
@@ -734,6 +747,22 @@ void QDockWidgetPrivate::updateButtons()
     bool nativeDeco = dwLayout->nativeWindowDeco();
     bool hideButtons = nativeDeco || customTitleBar;
 
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: 3ds Max uses in the docked version a custom 
+    // titlebar widget and in floating mode the native window frame.
+    // Adding / removing the custom titlebar widget during the topLevelChanged 
+    // signal causes a crash, so we just show / hide the bar like it is also
+    // done with the system window buttons.
+    //-------------------------------------------------------------------------
+    if ( q->property( "_3dsmax_hide_titlebar_on_floating" ).toBool() )
+    {
+        if ( auto custTitleBar = dwLayout->widgetForRole( QDockWidgetLayout::TitleBar ) )
+        {
+            custTitleBar->setVisible( !nativeDeco );
+        }
+    }
+    //-------------------------------------------------------------------------
+
     bool canClose = hasFeature(this, QDockWidget::DockWidgetClosable);
     bool canFloat = hasFeature(this, QDockWidget::DockWidgetFloatable);
 
@@ -1149,6 +1178,26 @@ void QDockWidgetPrivate::setWindowState(bool floating, bool unplug, const QRect 
     } else {
         flags |= Qt::FramelessWindowHint;
     }
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: 3ds Max uses in the docked version a custom 
+    // titlebar widget and in floating mode the native window frame.
+    // For the floating native window frame we allow 3ds Max to change the
+    // window flags so that it is possible to show up a standard OS frame with 
+    // the minimize / maximize window feature and the other fancy OS frame stuff.
+    // (e.g. knock the frame on screen border)
+    // The Qt default floating window type is always just a tool window, which 
+    // has none of the required features.
+    //-------------------------------------------------------------------------
+    if ( floating )
+    {
+        auto prop = q_ptr->property( "_3dsmax_floating_window_flags" );
+        if ( prop.isValid() )
+        {
+            flags = (Qt::WindowFlags) prop.toUInt();
+        }
+    }
+    //-------------------------------------------------------------------------
 
     if (unplug)
         flags |= Qt::X11BypassWindowManagerHint;

@@ -68,14 +68,120 @@ QT_BEGIN_NAMESPACE
 #ifndef QT_NO_ACCESSIBILITY
 
 #if QT_CONFIG(spinbox)
+
+class QAccessibleSpinBoxButton : public QAccessibleInterface
+{
+    public:
+    
+    QAccessibleSpinBoxButton( QAccessibleInterface* parent, QAbstractSpinBox* spinBox, QStyle::SubControl which )
+    :   m_Parent( parent ),
+        m_SpinBox( spinBox ),
+        m_Which( which )
+    {}
+
+    ~QAccessibleSpinBoxButton() { m_SpinBox = nullptr; }
+
+    // check for valid pointers
+    bool isValid() const override { return m_SpinBox != nullptr; }
+    QObject *object() const override { return nullptr; }
+
+    // relations
+    QAccessibleInterface *childAt(int, int) const override { return nullptr; }
+
+    // navigation, hierarchy
+    QAccessibleInterface* parent() const override { return m_Parent; }
+    QAccessibleInterface* child(int) const override { return nullptr; }
+    int childCount() const override { return 0; }
+    int indexOfChild(const QAccessibleInterface*) const override { return -1; }
+    
+    // properties and state
+    QString text(QAccessible::Text t) const override
+    {
+        if (t == QAccessible::Text::Name)
+        {
+            switch (m_Which)
+            {
+            case QStyle::SC_SpinBoxUp:
+                return "Up";
+            case QStyle::SC_SpinBoxDown:
+                return "Down";
+            }
+        }
+        return "";
+    }
+    void setText(QAccessible::Text, const QString &) override
+    {
+        Q_ASSERT(0);
+    }
+
+    QRect rect() const override
+    {
+        if ( m_SpinBox )
+        {
+            QStyleOptionSpinBox opt; 
+            opt.initFrom( m_SpinBox );
+            QRect rect = m_SpinBox->style()->subControlRect( QStyle::CC_SpinBox, &opt, m_Which, m_SpinBox );
+            rect.translate(m_SpinBox->mapToGlobal(QPoint(0, 0)));
+            return rect;
+        }
+        return QRect();
+    }
+
+    QAccessible::Role role() const override { return QAccessible::Button; }
+
+    QAccessible::State state() const override 
+    { 
+        QAccessible::State state;
+        if ( m_SpinBox )
+        {
+             if (m_SpinBox->testAttribute(Qt::WA_WState_Visible) == false)
+             {
+                state.invisible = true;
+             }
+            if (!m_SpinBox->isEnabled())
+            {
+                state.disabled = true;
+            }
+            else
+            {
+                QStyleOptionSpinBox opt; 
+                opt.initFrom( m_SpinBox );
+                if (( m_Which == QStyle::SC_SpinBoxUp && !opt.stepEnabled.testFlag( QAbstractSpinBox::StepUpEnabled ) ) || 
+                    ( m_Which == QStyle::SC_SpinBoxDown && !opt.stepEnabled.testFlag( QAbstractSpinBox::StepDownEnabled ) ) )
+                {
+                    state.disabled = true; 
+                }
+            }
+        }
+        return state;
+    }
+
+    private:
+    QAccessibleInterface* m_Parent;
+    QAbstractSpinBox* m_SpinBox;
+    QStyle::SubControl m_Which;
+};
+
+
 QAccessibleAbstractSpinBox::QAccessibleAbstractSpinBox(QWidget *w)
-: QAccessibleWidget(w, QAccessible::SpinBox), lineEdit(nullptr)
+: QAccessibleWidget(w, QAccessible::SpinBox),
+    lineEdit(nullptr), buttonUp( nullptr ), buttonDown( nullptr )
 {
     Q_ASSERT(abstractSpinBox());
 }
 
 QAccessibleAbstractSpinBox::~QAccessibleAbstractSpinBox()
 {
+    if ( buttonUp )
+    {
+        QAccessible::deleteAccessibleInterface( QAccessible::uniqueId( buttonUp ) );
+        buttonUp = nullptr;
+    }
+    if ( buttonDown )
+    {
+        QAccessible::deleteAccessibleInterface( QAccessible::uniqueId( buttonDown ) );
+        buttonDown = nullptr;
+    }
     delete lineEdit;
 }
 
@@ -99,11 +205,70 @@ QAccessibleInterface *QAccessibleAbstractSpinBox::lineEditIface() const
 #endif
 }
 
+QAccessibleInterface *QAccessibleAbstractSpinBox::buttonUpIface() const
+{
+    if ( !buttonUp ) 
+    {
+        QAbstractSpinBox* sp = abstractSpinBox();
+        if ( sp->buttonSymbols() != QAbstractSpinBox::NoButtons )
+        {
+            QAccessibleSpinBoxButton* up = new QAccessibleSpinBoxButton( const_cast<QAccessibleAbstractSpinBox*>(this), sp, QStyle::SC_SpinBoxUp );
+            QAccessible::registerAccessibleInterface( up );
+            buttonUp = up;
+        }
+    }
+    return buttonUp;
+}
+
+QAccessibleInterface *QAccessibleAbstractSpinBox::buttonDownIface() const 
+{
+    if ( !buttonDown )
+    {
+        QAbstractSpinBox* sp = abstractSpinBox();
+        if ( sp->buttonSymbols() != QAbstractSpinBox::NoButtons )
+        {
+            QAccessibleSpinBoxButton* down = new QAccessibleSpinBoxButton( const_cast<QAccessibleAbstractSpinBox*>(this), sp, QStyle::SC_SpinBoxDown );
+            QAccessible::registerAccessibleInterface( down );
+            buttonDown = down; 
+        }
+    }
+    return buttonDown;
+}
+
 QString QAccessibleAbstractSpinBox::text(QAccessible::Text t) const
 {
     if (t == QAccessible::Value)
         return abstractSpinBox()->text();
     return QAccessibleWidget::text(t);
+}
+
+int QAccessibleAbstractSpinBox::childCount() const
+{
+    QAbstractSpinBox* sp = abstractSpinBox();
+    if ( sp->buttonSymbols() == QAbstractSpinBox::NoButtons ) return 1;
+    return 3;
+}
+
+QAccessibleInterface* QAccessibleAbstractSpinBox::child(int idx) const
+{
+    if (idx == 0) return QAccessible::queryAccessibleInterface( abstractSpinBox()->lineEdit() );
+    if (idx == 1) return buttonUpIface();
+    if (idx == 2) return buttonDownIface();
+    return nullptr;
+}
+
+int QAccessibleAbstractSpinBox::indexOfChild(const QAccessibleInterface *child) const
+{
+    if ( child )
+    {
+        if ( child->object() == abstractSpinBox()->lineEdit() )
+        {
+            return 0;
+        }
+        if ( buttonUp == child ) return 1;
+        if ( buttonDown == child ) return 2;
+    }
+    return -1;
 }
 
 void *QAccessibleAbstractSpinBox::interface_cast(QAccessible::InterfaceType t)

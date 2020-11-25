@@ -99,11 +99,19 @@ static QString buddyString(const QWidget *widget)
     }
 #endif
 
-#if QT_CONFIG(groupbox)
-    QGroupBox *groupbox = qobject_cast<QGroupBox*>(parent);
-    if (groupbox)
-        return groupbox->title();
-#endif
+
+//----------------------------------------------------------------------------
+// Autodesk 3ds Max change: We don't want that behavior to happen, cause this
+// additional buddy-string thing is interfering with our automation scripts. 
+// We often have a bunch of widgets inside a groupbox that do not have an 
+// explicit accessible name set, so this would lead to a ton of spinners that
+// share the same name.
+// #if QT_CONFIG(groupbox)
+//    QGroupBox *groupbox = qobject_cast<QGroupBox*>(parent);
+//    if (groupbox)
+//        return groupbox->title();
+// #endif
+//----------------------------------------------------------------------------
 
     return QString();
 }
@@ -422,10 +430,24 @@ QString QAccessibleWidget::text(QAccessible::Text t) const
                 str = qt_setWindowTitle_helperHelper(widget()->windowTitle(), widget());
         } else {
             str = qt_accStripAmp(buddyString(widget()));
+            //----------------------------------------------------------------
+            // Autodesk 3ds Max change: If no specific string has been set and
+            // no buddy eigther, we will fall back to use the objectname - or 
+            // even the class name for fixing that.
+            //----------------------------------------------------------------
+            if ( !widget()->inherits("QGroupBox") && !widget()->inherits("QMenu") )
+            {
+                if (str.isEmpty())
+                    str = widget()->objectName();
+                if (str.isEmpty())
+                    str = widget()->metaObject()->className();
+            }
         }
         break;
     case QAccessible::Description:
         str = widget()->accessibleDescription();
+        if (str.isEmpty())
+            str = widget()->objectName();
 #ifndef QT_NO_TOOLTIP
         if (str.isEmpty())
             str = widget()->toolTip();

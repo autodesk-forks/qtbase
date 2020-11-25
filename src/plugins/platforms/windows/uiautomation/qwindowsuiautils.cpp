@@ -85,6 +85,26 @@ QWindow *windowForAccessible(const QAccessibleInterface *accessible)
 // Usually it will be NULL, as Qt5 by default uses alien widgets with no native windows.
 HWND hwndForAccessible(const QAccessibleInterface *accessible)
 {
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Addition
+    //-------------------------------------------------------------------------
+    // Some QWidgets in 3ds Max are hosting native legacy HWNDs showing various
+    // UI elements. Since those are just shallow wrappers around the embedded
+    // HWNDs, we directly jump to the embedded HWND here.
+    // The 3ds Max team has patched the QWinHost class of the QtWinMigrate
+    // project also to use this property accordingly.
+    //-------------------------------------------------------------------------
+    if (auto obj = accessible->object()) {
+        auto prop = obj->property("_3dsmax_hosted_hwnd");
+        if (prop.isValid()) {
+            if (auto nativeChildHWND = reinterpret_cast<HWND>(qvariant_cast<void *>(prop))) {
+                if (IsWindow(nativeChildHWND)) {
+                    return nativeChildHWND;
+                }
+            }
+        }
+    }
+
     if (QWindow *window = accessible->window()) {
         if (!accessible->parent() || (accessible->parent()->window() != window)) {
             return QWindowsBaseWindow::handleOf(window);

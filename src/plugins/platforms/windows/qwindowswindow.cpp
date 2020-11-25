@@ -2563,7 +2563,37 @@ void QWindowsWindow::requestActivateWindow()
                 }
             }
         }
-        SetForegroundWindow(m_data.hwnd);
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: When 3ds Max starts up we have a lot 
+        // of focus stealing issues of 3ds Max on other applications foreground
+        // windows. This is caused by the call to SetForegroundWindow() 
+        // whenever a Qt window gets focused / activated.
+        // To prevent this we make the SetForegroundWindow() call conditional 
+        // on a flag that 3ds Max can set when it is launching.
+        // Note that QWindow::requestActivate() offers a possiblity via the
+        // flag 'Qt::WindowDoesNotAcceptFocus' to suppress calls to 
+        // QWindowsWindow::requestActivateWindow() for that window, but using 
+        // the flag would disable both calls to SetForegroundWindow() and 
+        // SetFocus(), which is not useful in the case of 3ds Max, since it 
+        // can execute scripts on start up that popup Qt windows which rely 
+        // on the proper focus setting.
+        //------------------------------------------------------------------
+        bool doSetForegroundWnd = true;
+        if ( qApp )
+        {
+            auto prop = qApp->property( "_3dsmax_disableSetForegroundWnd" );
+            if ( prop.isValid() && prop.toBool() == true )
+            {
+                doSetForegroundWnd = false;
+            }
+        }
+
+        if ( doSetForegroundWnd )
+        {
+            SetForegroundWindow(m_data.hwnd);
+        }
+
         SetFocus(m_data.hwnd);
         if (attached)
             AttachThreadInput(foregroundThread, currentThread, FALSE);

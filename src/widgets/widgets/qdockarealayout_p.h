@@ -123,6 +123,48 @@ public:
     QRect topLevelRect;
 };
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max addition: Extended docking resize behavior
+// Helper class that contains a collection of parameters that is used
+// for the docking layout calculation during the separator move.
+//
+// A drag move separator will now just do a single sided resizing of one 
+// layout item and keep the size of the layout item on the other side of 
+// the separator. The space that it needs for growing or shrinking will be 
+// taken from the center docking area.
+//
+// A shift+drag move separator will do the common Qt two sided resizing
+// where on both sides of the separator one item will grow and the other
+// one shrink. When the dragging is done in direction of the center docking
+// area and all items in that direction has been already shrunk to their
+// minimum size, then dragging doesn't get stuck as used to be, instead it 
+// will continue and move the shrunken items into the center docking area.
+//-------------------------------------------------------------------------
+class SeparatorMoveInfo
+{
+public:
+    // True when one of the center dock area separators is moved.
+    bool isCenterSeparatorMove = false;
+
+    // Indicates whether we should do a grow or shrink.
+    bool doGrow = false;
+
+    // Indicates if we should do a single sided or two sided separator resizing.
+    bool doTwoSidedMove = false;
+
+    // Returns the amount the layout container has changed.
+    int deltaContainerChangedReturn = 0;
+
+    // Returns if the layout container was shrunk or grown.
+    bool containerShrinkedReturn = false;
+
+    // Returns the delta of the separator move that wasn't processed,
+    // due to some min/max constraints.
+    int deltaNotMovedReturn = 0;
+    
+};
+//-------------------------------------------------------------------------
+
 class Q_AUTOTEST_EXPORT QDockAreaLayoutInfo
 {
 public:
@@ -183,7 +225,13 @@ public:
     void paintSeparators(QPainter *p, QWidget *widget, const QRegion &clip,
                             const QPoint &mouse) const;
     QRegion separatorRegion() const;
-    int separatorMove(int index, int delta);
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: Extended docking resize behavior
+    // Added additional parameters necessary for the extended separator move
+    // behavior.
+    //-------------------------------------------------------------------------
+    int separatorMove(int index, int delta, SeparatorMoveInfo* smi = nullptr, bool doFitSubInfoItems = true);
     int separatorMove(const QList<int> &separator, const QPoint &origin, const QPoint &dest);
 
     QLayoutItem *itemAt(int *x, int index) const;
@@ -222,6 +270,23 @@ public:
     int tabIndexToListIndex(int) const;
     void moveTab(int from, int to);
 #endif // QT_CONFIG(tabbar)
+
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Extended docking resize behavior
+    // Adds an additional flag for the indication if on info->fitItems() the 
+    // Qt default layout item distribution should happen, which means that all 
+    // expansive items will get a part of the available space, or if the 
+    // first/last expansive item in the layout list should be preferred for
+    // receiving the free space.
+    //-------------------------------------------------------------------------
+    enum FitItemsExpandMode
+    {
+        ExpandAll = 0, // Qt default, distributes the available space to all expandable items.
+        ExpandFirst = 1, // Prefers the first expansive item to get the available space.
+        ExpandLast = 2 // Prefers the last expansive item to get the available space.
+    };
+    FitItemsExpandMode fitItemsExpandMode = ExpandAll;
+    //-------------------------------------------------------------------------
 };
 
 class Q_AUTOTEST_EXPORT QDockAreaLayout
@@ -273,7 +338,12 @@ public:
     QSize sizeHint() const;
     QSize minimumSize() const;
 
-    void addDockWidget(QInternal::DockPosition pos, QDockWidget *dockWidget, Qt::Orientation orientation);
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+    // makes it possible to add a dock widget to the front of the dock area 
+    // container so that the widget can appear close to the main windows center area.
+    //-------------------------------------------------------------------------
+    void addDockWidget(QInternal::DockPosition pos, QDockWidget *dockWidget, Qt::Orientation orientation, bool toFront);
     bool restoreDockWidget(QDockWidget *dockWidget);
     void splitDockWidget(QDockWidget *after, QDockWidget *dockWidget,
                          Qt::Orientation orientation);

@@ -96,9 +96,6 @@ private:
     static void updateScreens();
     static void cleanupScreens();
 
-    static bool updateScreensIfNeeded();
-    static NSArray *s_screenConfigurationBeforeUpdate;
-
     static void add(CGDirectDisplayID displayId);
     QCocoaScreen(CGDirectDisplayID displayId);
     void update(CGDirectDisplayID displayId);

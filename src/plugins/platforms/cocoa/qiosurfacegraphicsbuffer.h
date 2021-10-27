@@ -43,6 +43,9 @@
 #include <qpa/qplatformgraphicsbuffer.h>
 #include <private/qcore_mac_p.h>
 
+#include <CoreGraphics/CGColorSpace.h>
+
+
 QT_BEGIN_NAMESPACE
 
 class QIOSurfaceGraphicsBuffer : public QPlatformGraphicsBuffer

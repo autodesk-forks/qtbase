@@ -236,9 +236,9 @@ struct MessageHandler
         qInstallMessageHandler(oldMessageHandler);
     }
 
-    inline static bool receivedMessage = false;
-    inline static QtMessageHandler oldMessageHandler = nullptr;
-    inline static QStringList messages;
+    static bool receivedMessage;
+    static QtMessageHandler oldMessageHandler;
+    static QStringList messages;
     static void myMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &text)
     {
         if (!text.startsWith("Populating font family aliases took")) {
@@ -250,12 +250,17 @@ struct MessageHandler
     }
 };
 
+bool MessageHandler::receivedMessage = false;
+QtMessageHandler MessageHandler::oldMessageHandler = nullptr;
+QStringList MessageHandler::messages;
+
 
 void tst_QFontCache::threadedAccess()
 {
     MessageHandler messageHandler;
     auto lambda = []{
-        for (const auto &family : QFontDatabase::families()) {
+        QFontDatabase fontDatabase;
+        for (const auto family : fontDatabase.families()) {
             QFont font(family);
             QFontMetrics fontMetrics(font);
             fontMetrics.height();

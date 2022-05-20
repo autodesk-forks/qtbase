@@ -2,8 +2,8 @@ COCOA_LFLAGS = -framework Foundation -framework CoreServices
 CARBON_LFLAGS = -framework ApplicationServices
 CARBON_CFLAGS = -fconstant-cfstrings
 
-EXTRA_CXXFLAGS = $(CARBON_CFLAGS)
-EXTRA_LFLAGS = $(COCOA_LFLAGS) $(CARBON_LFLAGS)
+EXTRA_CXXFLAGS = $(CARBON_CFLAGS) -arch x86_64 -arch arm64
+EXTRA_LFLAGS = $(COCOA_LFLAGS) $(CARBON_LFLAGS) -arch x86_64 -arch arm64
 
 QTOBJS2 = \
     qsettings_mac.o \

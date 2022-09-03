@@ -834,7 +834,8 @@
                     "// embedded devices, are not intended to be used together with X. EGL support",
                     "// has to be disabled in plugins like xcb in this case since the native display,",
                     "// window and pixmap types will be different than what an X-based platform",
-                    "// plugin would expect."
+                    "// plugin would expect.",
+                    "#define USE_X11"
                 ],
                 "include": [ "EGL/egl.h", "X11/Xlib.h" ],
                 "main": [

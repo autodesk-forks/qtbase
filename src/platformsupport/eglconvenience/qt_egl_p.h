@@ -61,6 +61,10 @@
 # if !defined(Q_OS_INTEGRITY)
 #  define WIN_INTERFACE_CUSTOM   // NV
 # endif // Q_OS_INTEGRITY
+#else // QT_EGL_NO_X11
+// if one has an eglplatform.h with https://github.com/KhronosGroup/EGL-Registry/pull/130
+// that needs USE_X11 to be defined.
+# define USE_X11
 #endif  // QT_EGL_NO_X11
 
 #ifdef QT_EGL_WAYLAND

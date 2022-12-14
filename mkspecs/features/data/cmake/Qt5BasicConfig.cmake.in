@@ -318,9 +318,11 @@ if (NOT TARGET Qt5::$${CMAKE_MODULE_NAME})
 !!ENDIF // TEMPLATE != aux
 
     foreach(_module_dep ${_Qt5$${CMAKE_MODULE_NAME}_MODULE_DEPENDENCIES})
+        # Force 5.15.2 to resolve webengine modules looking for 5.15.7 versioned qt modules.
+        set(_ver 5.15.2)
         if (NOT Qt5${_module_dep}_FOUND)
             find_package(Qt5${_module_dep}
-                $$VERSION ${_Qt5$${CMAKE_MODULE_NAME}_FIND_VERSION_EXACT}
+                ${_ver} ${_Qt5$${CMAKE_MODULE_NAME}_FIND_VERSION_EXACT}
                 ${_Qt5$${CMAKE_MODULE_NAME}_DEPENDENCIES_FIND_QUIET}
                 ${_Qt5$${CMAKE_MODULE_NAME}_FIND_DEPENDENCIES_REQUIRED}
                 PATHS \"${CMAKE_CURRENT_LIST_DIR}/..\" NO_DEFAULT_PATH

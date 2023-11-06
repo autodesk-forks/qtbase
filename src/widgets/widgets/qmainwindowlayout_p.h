@@ -38,6 +38,7 @@
 #include "qtoolbararealayout_p.h"
 #endif
 #include <QtCore/qloggingcategory.h>
+#include <unordered_map>
 
 QT_REQUIRE_CONFIG(mainwindow);
 
@@ -335,6 +336,7 @@ protected:
 
 private:
     QSize m_removedFrameSize;
+    std::unordered_map<QDockWidget*, QMetaObject::Connection> m_widgetConnections;
 };
 
 // This item will be used in the layout for the gap item. We cannot use QWidgetItem directly

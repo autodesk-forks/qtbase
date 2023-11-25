@@ -680,19 +680,25 @@ void QTabBarPrivate::makeVisible(int index)
     const int scrolledTabBarStart = qMax(1, scrollRect.left() + scrollOffset);
     const int scrolledTabBarEnd = qMin(lastTabEnd - 1, scrollRect.right() + scrollOffset);
 
-    if (tabStart < scrolledTabBarStart) {
-        // Tab is outside on the left, so scroll left.
-        scrollOffset = tabStart - scrollRect.left();
-    } else if (tabEnd > scrolledTabBarEnd) {
-        // Tab is outside on the right, so scroll right.
-        scrollOffset = qMax(0, tabEnd - scrollRect.right());
-    } else if (scrollOffset + entireScrollRect.width() > lastTabEnd + 1) {
-        // fill any free space on the right without overshooting
-        scrollOffset = qMax(0, lastTabEnd - entireScrollRect.width() + 1);
-    } else if (available >= lastTabEnd) {
-        // the entire tabbar fits, reset scroll
+    if (available >= lastTabEnd) {
+        // the entire tabbar fits, reset scroll offset.
         scrollOffset = 0;
+    } else {
+        if (tabStart < scrolledTabBarStart) {
+            // Tab is partially occluded on the left, adjust offset to make tab fully visible.
+            scrollOffset = tabStart - scrollRect.left();
+        } else if (tabEnd > scrolledTabBarEnd) {
+            // Tab is partially occluded on the right, adjust offset to make tab fully visible.
+            scrollOffset = tabEnd - scrollRect.right();
+        }
+      
+        if (scrollOffset + entireScrollRect.width() > lastTabEnd + 1) {
+            // fill any free space on the right without overshooting.
+            scrollOffset = lastTabEnd - entireScrollRect.width() + 1;
+        }
     }
+
+    scrollOffset = qMax(0, scrollOffset);
 
     leftB->setEnabled(scrollOffset > -scrollRect.left());
     rightB->setEnabled(scrollOffset < lastTabEnd - scrollRect.right());

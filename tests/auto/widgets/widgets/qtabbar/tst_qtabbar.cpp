@@ -100,6 +100,7 @@ private slots:
     void resizeKeepsScroll();
     void changeTabTextKeepsScroll();
     void settingCurrentTabBeforeShowDoesntScroll();
+    void checkScrollResetAfterTabRemoval();
 
 private:
     void checkPositions(const TabBar &tabbar, const QList<int> &positions);
@@ -1480,6 +1481,51 @@ void tst_QTabBar::settingCurrentTabBeforeShowDoesntScroll()
 
     // this should scroll
     QCOMPARE_GT(getScrollOffset(), 0);
+}
+
+void tst_QTabBar::checkScrollResetAfterTabRemoval()
+{
+    class TabWidget : public QTabWidget
+    {
+    public:
+        using QTabWidget::QTabWidget;
+        using QTabWidget::setTabBar;
+    };
+  
+    TabWidget tabWidget;
+    QTabBar tabBar;
+    tabBar.setUsesScrollButtons(true);
+
+    tabWidget.setTabBar(&tabBar);
+    for (int i = 0; i < 6; ++i)
+        tabWidget.addTab(new QWidget, u"Tab %1"_s.arg(i));
+    tabWidget.setTabPosition(QTabWidget::North);
+    tabWidget.setCurrentIndex(0);
+    tabWidget.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&tabWidget));
+    
+    QVERIFY(tabWidget.tabBar()->tabRect(0).intersects(tabWidget.tabBar()->rect()));
+    auto *rightButton = tabBar.findChild<QAbstractButton*>(u"ScrollRightButton"_s);
+
+    QVERIFY(rightButton);
+    QVERIFY(rightButton->isEnabled());
+    // simulate a right button click to increase the scroll offset.
+    for (int i = 0; i < 2; i++)
+        rightButton->click();
+    
+    const auto getScrollOffset = [&]() -> int {
+        return static_cast<QTabBarPrivate *>(QObjectPrivate::get(&tabBar))->scrollOffset;
+    };
+
+    // scroll offset is expected to be greater than 0.
+    QCOMPARE_GT(getScrollOffset(), 0);
+    
+    QVERIFY(!tabWidget.tabBar()->tabRect(0).intersects(tabWidget.tabBar()->rect()));
+    // try removing the last tab and check if the scroll offset is reset to 0, to show the first tab.
+    tabWidget.removeTab(5);
+
+    // scroll offset is expected to be reset to 0.
+    QCOMPARE(getScrollOffset(), 0);
 }
 
 QTEST_MAIN(tst_QTabBar)

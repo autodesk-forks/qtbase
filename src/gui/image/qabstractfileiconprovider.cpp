@@ -239,12 +239,15 @@ QString QAbstractFileIconProvider::type(const QFileInfo &info) const
     if (QFileSystemEntry::isRootPath(info.absoluteFilePath()))
         return QGuiApplication::translate("QAbstractFileIconProvider", "Drive");
     if (info.isFile()) {
-#if QT_CONFIG(mimetype)
+#if 0 //QT_CONFIG(mimetype)
         const QMimeType mimeType = d->mimeDatabase.mimeTypeForFile(info);
         return mimeType.comment().isEmpty() ? mimeType.name() : mimeType.comment();
 #else
-        Q_UNUSED(d);
-        return QGuiApplication::translate("QAbstractFileIconProvider", "File");
+        if (!info.suffix().isEmpty()) {
+            //: %1 is a file name suffix, for example txt
+            return QGuiApplication::translate("QAbstractFileIconProvider", "%1 File").arg(info.suffix());
+        }
+		return QGuiApplication::translate("QAbstractFileIconProvider", "File");
 #endif
     }
 

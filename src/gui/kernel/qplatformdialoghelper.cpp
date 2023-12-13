@@ -780,6 +780,7 @@ public:
     Qt::CheckState checkBoxState = Qt::Unchecked;
     int defaultButtonId = 0;
     int escapeButtonId = 0;
+    QMessageDialogOptions::Options options;
 };
 
 QMessageDialogOptions::QMessageDialogOptions(QMessageDialogOptionsPrivate *dd)
@@ -950,6 +951,29 @@ int QMessageDialogOptions::escapeButton() const
 {
     return d->escapeButtonId;
 }
+
+void QMessageDialogOptions::setOption(QMessageDialogOptions::Option option, bool on)
+{
+    if (!(d->options & option) != !on)
+        setOptions(d->options ^ option);
+}
+
+bool QMessageDialogOptions::testOption(QMessageDialogOptions::Option option) const
+{
+    return d->options & option;
+}
+
+void QMessageDialogOptions::setOptions(QMessageDialogOptions::Options options)
+{
+    if (options != d->options)
+        d->options = options;
+}
+
+QMessageDialogOptions::Options QMessageDialogOptions::options() const
+{
+    return d->options;
+}
+
 
 QPlatformDialogHelper::ButtonRole QPlatformDialogHelper::buttonRole(QPlatformDialogHelper::StandardButton button)
 {

@@ -35,8 +35,6 @@
 #include <qmap.h>
 #include <qtimer.h>
 #include <qpointer.h>
-#include <qobject.h>
-#include <qaction.h>
 
 #ifndef QT_NO_DEBUG_STREAM
 #  include <qdebug.h>
@@ -266,20 +264,6 @@ bool QDockWidgetGroupWindow::event(QEvent *e)
         if (QDockWidget *dw = activeTabbedDockWidget()) {
             dw->close();
             adjustFlags();
-            // when all child QDockWidgets' are closed, this QDockWidgetGroupWindow will be hidden
-            // after receiving the `LayoutRequest` event. This causes subsequent call to show
-            // on the current QDockWidget to fail. Hence, adding a connection to the 
-            // QDockWidget's toggle action to re-show this QDockWidgetGroupWindow along with the 
-            // current QDockWidget.
-            m_widgetConnections[dw] = connect(dw->toggleViewAction(), &QAction::toggled, [this, dw]() {
-                // show this QDockWidgetGroupWindow before showing the child QDockWidget.
-                show();
-                dw->show();
-                // once at least one child becomes visible, clear all listeners since we no longer need them..
-                for (const auto& pair : m_widgetConnections)
-                    disconnect(pair.second);
-                m_widgetConnections.clear();
-            });
         }
 #endif
         return true;
@@ -303,10 +287,6 @@ bool QDockWidgetGroupWindow::event(QEvent *e)
     case QEvent::ChildAdded:
         if (qobject_cast<QDockWidget *>(static_cast<QChildEvent*>(e)->child()))
             adjustFlags();
-        break;
-    case QEvent::ChildRemoved:
-        if (auto widget = qobject_cast<QDockWidget *>(static_cast<QChildEvent*>(e)->child()))
-            m_widgetConnections.erase(widget);
         break;
     case QEvent::LayoutRequest:
         // We might need to show the widget again
@@ -2597,7 +2577,70 @@ QLayoutItem *QMainWindowLayout::unplug(QWidget *widget, bool group)
 
             // unplug the widget first
             dockWidget->d_func()->unplug(widget->geometry());
-            return item;
+
+            // Create a floating tab, copy properties and generate layout info
+            QDockWidgetGroupWindow *floatingTabs = createTabbedDockWindow();
+            const QInternal::DockPosition dockPos = groupWindow->layoutInfo()->dockPos;
+            QDockAreaLayoutInfo *info = floatingTabs->layoutInfo();
+
+            const QTabBar::Shape shape = tabwidgetPositionToTabBarShape(dockWidget);
+
+            // Populate newly created DockAreaLayoutInfo of floating tabs
+            *info = QDockAreaLayoutInfo(&layoutState.dockAreaLayout.sep, dockPos,
+                                        Qt::Horizontal, shape,
+                                        layoutState.mainWindow);
+
+            // Create tab and hide it as group window contains only one widget
+            info->tabbed = true;
+            info->tabBar = getTabBar();
+            info->tabBar->hide();
+            updateGapIndicator();
+
+            // Reparent it to a QDockWidgetGroupLayout
+            floatingTabs->setGeometry(dockWidget->geometry());
+
+            // Append reference to floatingTabs to the dock's item_list
+            parentItem.widgetItem = new QDockWidgetGroupWindowItem(floatingTabs);
+            layoutState.dockAreaLayout.docks[dockPos].item_list.append(parentItem);
+
+            // use populated parentItem to set reference to dockWidget as the first item in own list
+            parentItem.widgetItem = new QDockWidgetItem(dockWidget);
+            info->item_list = {parentItem};
+
+            // Add non-gap items of the dock to the tab bar
+            for (const auto &listItem : layoutState.dockAreaLayout.docks[dockPos].item_list) {
+                if (listItem.GapItem || !listItem.widgetItem)
+                    continue;
+                info->tabBar->addTab(listItem.widgetItem->widget()->objectName());
+            }
+
+            // Re-parent and fit
+            floatingTabs->setParent(layoutState.mainWindow);
+            floatingTabs->layoutInfo()->fitItems();
+            floatingTabs->layoutInfo()->apply(dockOptions & QMainWindow::AnimatedDocks);
+            groupWindow->layoutInfo()->fitItems();
+            groupWindow->layoutInfo()->apply(dockOptions & QMainWindow::AnimatedDocks);
+            dockWidget->d_func()->tabPosition = layoutState.mainWindow->tabPosition(toDockWidgetArea(dockPos));
+            info->reparentWidgets(floatingTabs);
+            dockWidget->setParent(floatingTabs);
+            info->updateTabBar();
+
+            // Show the new item
+            const QList<int> path = layoutState.indexOf(floatingTabs);
+            QRect r = layoutState.itemRect(path);
+            savedState = layoutState;
+            savedState.fitLayout();
+
+            // Update gap, fix orientation, raise and show
+            currentGapPos = path;
+            currentGapRect = r;
+            updateGapIndicator();
+            fixToolBarOrientation(parentItem.widgetItem, currentGapPos.at(1));
+            floatingTabs->show();
+            floatingTabs->raise();
+
+            qCDebug(lcQpaDockWidgets) << "Unplugged from floating dock:" << widget << "from" << parentItem.widgetItem;
+            return parentItem.widgetItem;
         }
     }
 #endif
@@ -2794,18 +2837,10 @@ void QMainWindowLayout::hover(QLayoutItem *hoverTarget,
                     info->tabBar = getTabBar();
                     info->tabbed = true;
                     QLayout *parentLayout = dropTo->parentWidget()->layout();
-                    auto parentItem = QDockAreaLayoutItem(parentLayout->takeAt(parentLayout->indexOf(dropTo)));
-                    if (!parentItem.widgetItem)
-                        parentItem.widgetItem = new QDockWidgetItem(dropTo);
-                    info->item_list.append(parentItem);
-                    
-                    auto oldGroupWindow = qobject_cast<QDockWidgetGroupWindow *>(dropTo->parent());
-                    dropTo->setParent(floatingTabs);
-                    // just an early cleanup to if there are no other children.
-                    if (oldGroupWindow) {
-                        oldGroupWindow->destroyOrHideIfEmpty();
-                    }
+                    info->item_list.append(
+                        QDockAreaLayoutItem(parentLayout->takeAt(parentLayout->indexOf(dropTo))));
 
+                    dropTo->setParent(floatingTabs);
                     qCDebug(lcQpaDockWidgets) << "Wrapping" << widget << "into floating tabs" << floatingTabs;
                     w = floatingTabs;
                 }

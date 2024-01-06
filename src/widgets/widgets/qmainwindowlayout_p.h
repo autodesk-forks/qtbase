@@ -29,6 +29,7 @@
 #include "QtCore/qset.h"
 #include "private/qlayoutengine_p.h"
 #include "private/qwidgetanimator_p.h"
+#include "private/qdockwidget_p.h"
 
 #if QT_CONFIG(dockwidget)
 #include "qdockarealayout_p.h"
@@ -322,6 +323,10 @@ public:
     void updateCurrentGapRect();
     void restore();
     void apply();
+    void childEvent(QChildEvent *event) override;
+    void reparent(QDockWidget *dockWidget);
+    void destroyIfSingleItemLeft();
+    QList<QDockWidget *> dockWidgets() const { return findChildren<QDockWidget *>(); }
 
     QRect currentGapRect;
     QList<int> currentGapPos;
@@ -331,6 +336,7 @@ signals:
 
 protected:
     bool event(QEvent *) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
     void paintEvent(QPaintEvent*) override;
 
 private:
@@ -492,6 +498,7 @@ public:
                          Qt::Orientation orientation);
     Qt::DockWidgetArea dockWidgetArea(QWidget* widget) const;
     bool restoreDockWidget(QDockWidget *dockwidget);
+    void showDockWidgets() const;
 #if QT_CONFIG(tabbar)
     void tabifyDockWidget(QDockWidget *first, QDockWidget *second);
     void raise(QDockWidget *widget);
@@ -561,12 +568,13 @@ public:
 #if QT_CONFIG(dockwidget)
     QPointer<QDockWidgetGroupWindow> currentHoveredFloat; // set when dragging over a floating dock widget
     void setCurrentHoveredFloat(QDockWidgetGroupWindow *w);
+    bool isDockWidgetTabbed(const QDockWidget *dockWidget) const;
 #endif
     bool isInApplyState = false;
 
     void hover(QLayoutItem *hoverTarget, const QPoint &mousePos);
     bool plug(QLayoutItem *widgetItem);
-    QLayoutItem *unplug(QWidget *widget, bool group = false);
+    QLayoutItem *unplug(QWidget *widget, QDockWidgetPrivate::DragScope scope);
     void revert(QLayoutItem *widgetItem);
     void applyState(QMainWindowLayoutState &newState, bool animate = true);
     void restore(bool keepSavedState = false);

@@ -173,7 +173,7 @@ void QToolBarPrivate::startDrag(bool moving)
     Q_ASSERT(layout != nullptr);
 
     if (!moving) {
-        state->widgetItem = layout->unplug(q);
+        state->widgetItem = layout->unplug(q, QDockWidgetPrivate::DragScope::Group);
         Q_ASSERT(state->widgetItem != nullptr);
     }
     state->dragging = !moving;

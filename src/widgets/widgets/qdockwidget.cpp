@@ -768,7 +768,7 @@ void QDockWidgetPrivate::initDrag(const QPoint &pos, bool nca)
     tabbed widgets, and false if the dock widget should always be dragged
     alone.
  */
-void QDockWidgetPrivate::startDrag(bool group)
+void QDockWidgetPrivate::startDrag(DragScope scope)
 {
     Q_Q(QDockWidget);
 
@@ -778,7 +778,7 @@ void QDockWidgetPrivate::startDrag(bool group)
     QMainWindowLayout *layout = qt_mainwindow_layout_from_dock(q);
     Q_ASSERT(layout != nullptr);
 
-    state->widgetItem = layout->unplug(q, group);
+    state->widgetItem = layout->unplug(q, scope);
     if (state->widgetItem == nullptr) {
         /*  Dock widget has a QMainWindow parent, but was never inserted with
             QMainWindow::addDockWidget, so the QMainWindowLayout has no
@@ -803,7 +803,7 @@ void QDockWidgetPrivate::startDrag(bool group)
     The \a abort parameter specifies that it ends because of programmatic state
     reset rather than mouse release event.
  */
-void QDockWidgetPrivate::endDrag(bool abort)
+void QDockWidgetPrivate::endDrag(EndDragMode mode)
 {
     Q_Q(QDockWidget);
     Q_ASSERT(state != nullptr);
@@ -815,7 +815,7 @@ void QDockWidgetPrivate::endDrag(bool abort)
         Q_ASSERT(mainWindow != nullptr);
         QMainWindowLayout *mwLayout = qt_mainwindow_layout(mainWindow);
 
-        if (abort || !mwLayout->plug(state->widgetItem)) {
+        if (mode == EndDragMode::Abort || !mwLayout->plug(state->widgetItem)) {
             if (hasFeature(this, QDockWidget::DockWidgetFloatable)) {
                 // This QDockWidget will now stay in the floating state.
                 if (state->ownWidgetItem) {
@@ -847,6 +847,11 @@ void QDockWidgetPrivate::endDrag(bool abort)
                         tabPosition = mwLayout->tabPosition(toDockWidgetArea(dwgw->layoutInfo()->dockPos));
                     }
 #endif
+                    // Reparent, if the drag was out of a dock widget group window
+                    if (mode == EndDragMode::LocationChange) {
+                        if (auto *groupWindow = qobject_cast<QDockWidgetGroupWindow *>(q->parentWidget()))
+                            groupWindow->reparent(q);
+                    }
                 }
                 q->activateWindow();
             } else {
@@ -944,6 +949,15 @@ bool QDockWidgetPrivate::mouseDoubleClickEvent(QMouseEvent *event)
     return false;
 }
 
+bool QDockWidgetPrivate::isTabbed() const
+{
+    Q_Q(const QDockWidget);
+    QDockWidget *that = const_cast<QDockWidget *>(q);
+    auto *mwLayout = qt_mainwindow_layout_from_dock(that);
+    Q_ASSERT(mwLayout);
+    return mwLayout->isDockWidgetTabbed(q);
+}
+
 bool QDockWidgetPrivate::mouseMoveEvent(QMouseEvent *event)
 {
     bool ret = false;
@@ -974,7 +988,8 @@ bool QDockWidgetPrivate::mouseMoveEvent(QMouseEvent *event)
             } else
 #endif
             {
-                startDrag();
+                const DragScope scope = isTabbed() ? DragScope::Group : DragScope::Widget;
+                startDrag(scope);
                 q->grabMouse();
                 ret = true;
             }
@@ -1040,7 +1055,7 @@ bool QDockWidgetPrivate::mouseReleaseEvent(QMouseEvent *event)
 #if QT_CONFIG(mainwindow)
 
     if (event->button() == Qt::LeftButton && state && !state->nca) {
-        endDrag();
+        endDrag(EndDragMode::LocationChange);
         return true; //filter out the event
     }
 
@@ -1079,22 +1094,21 @@ void QDockWidgetPrivate::nonClientAreaMouseEvent(QMouseEvent *event)
                 break;
             state->ctrlDrag = (event->modifiers() & Qt::ControlModifier) ||
                               (!hasFeature(this, QDockWidget::DockWidgetMovable) && q->isFloating());
-            startDrag();
+            startDrag(DragScope::Group);
             break;
         case QEvent::NonClientAreaMouseMove:
             if (state == nullptr || !state->dragging)
                 break;
 
 #if !defined(Q_OS_MAC) && !defined(Q_OS_WASM)
-            if (state->nca) {
-                endDrag();
-            }
+            if (state->nca)
+                endDrag(EndDragMode::LocationChange);
 #endif
             break;
         case QEvent::NonClientAreaMouseButtonRelease:
 #if defined(Q_OS_MAC) || defined(Q_OS_WASM)
                         if (state)
-                                endDrag();
+                            endDrag(EndDragMode::LocationChange);
 #endif
                         break;
         case QEvent::NonClientAreaMouseButtonDblClick:
@@ -1418,7 +1432,7 @@ void QDockWidget::setFloating(bool floating)
 
     // the initial click of a double-click may have started a drag...
     if (d->state != nullptr)
-        d->endDrag(true);
+        d->endDrag(QDockWidgetPrivate::EndDragMode::Abort);
 
     QRect r = d->undockedGeometry;
     // Keep position when undocking for the first time.
@@ -1506,7 +1520,7 @@ void QDockWidget::closeEvent(QCloseEvent *event)
 {
     Q_D(QDockWidget);
     if (d->state)
-        d->endDrag(true);
+        d->endDrag(QDockWidgetPrivate::EndDragMode::Abort);
     QWidget::closeEvent(event);
 }
 
@@ -1781,6 +1795,27 @@ QWidget *QDockWidget::titleBarWidget() const
         = qobject_cast<QDockWidgetLayout*>(this->layout());
     return layout->widgetForRole(QDockWidgetLayout::TitleBar);
 }
+
+#ifndef QT_NO_DEBUG_STREAM
+QDebug operator<<(QDebug dbg, const QDockWidget *dockWidget)
+{
+    QDebugStateSaver saver(dbg);
+    dbg.nospace();
+    return dockWidget ? dbg << *dockWidget : dbg << "QDockWidget(0x0)";
+}
+
+QDebug operator<<(QDebug dbg, const QDockWidget &dockWidget)
+{
+    QDebugStateSaver saver(dbg);
+    dbg.nospace();
+    dbg << "QDockWidget(" << static_cast<const void *>(&dockWidget);
+    dbg << "->(ObjectName=" << dockWidget.objectName();
+    dbg << "; floating=" << dockWidget.isFloating();
+    dbg << "; features=" << dockWidget.features();
+    dbg << ";))";
+    return dbg;
+}
+#endif // QT_NO_DEBUG_STREAM
 
 QT_END_NAMESPACE
 

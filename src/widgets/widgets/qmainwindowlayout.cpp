@@ -1565,9 +1565,14 @@ QRect QMainWindowLayout::dockWidgetAreaRect(const Qt::DockWidgetArea area, DockW
 }
 #endif
 
+//-------------------------------------------------------------------------
+// Autodesk 3ds Max Change: Adds an additional toFront parameter, that 
+// makes it possible to add a dock widget to the front of the dock area 
+// container so that the widget can appear close to the main windows center area.
+//-------------------------------------------------------------------------
 void QMainWindowLayout::addDockWidget(Qt::DockWidgetArea area,
                                              QDockWidget *dockwidget,
-                                             Qt::Orientation orientation)
+                                             Qt::Orientation orientation, bool toFront)
 {
     addChildWidget(dockwidget);
 
@@ -1576,7 +1581,7 @@ void QMainWindowLayout::addDockWidget(Qt::DockWidgetArea area,
     if (!movingSeparator.isEmpty())
         endSeparatorMove(movingSeparatorPos);
 
-    layoutState.dockAreaLayout.addDockWidget(toDockPos(area), dockwidget, orientation);
+    layoutState.dockAreaLayout.addDockWidget(toDockPos(area), dockwidget, orientation, toFront);
     emit dockwidget->dockLocationChanged(area);
     invalidate();
 }

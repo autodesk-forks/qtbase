@@ -35,6 +35,38 @@ QT_REQUIRE_CONFIG(tabbar);
 
 QT_BEGIN_NAMESPACE
 
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Adds a new tool button to the tab left / right scroll buttons
+// which opens up a quick select menu containing all tabs.
+//------------------------------------------------------------------
+class TabsMenuBtn : public QToolButton
+{
+    Q_OBJECT
+
+public:
+    TabsMenuBtn( QTabBar* parent = nullptr );
+
+    void tabOrderChanged();
+    void updateTabsMenu();
+
+protected:
+    void paintEvent( QPaintEvent* evt ) Q_DECL_OVERRIDE;
+
+public slots:
+    void tabsMenuActionTriggered( QAction* action );
+    void tabsMenuAboutToShow();
+    void currentTabChanged();
+
+private:
+    QMenu* mTabsMenu = nullptr;
+    QTabBar* mTabBar = nullptr;
+    bool mTabOrderDirty = true;
+    bool mCurTabDirty = true;
+};
+
+
 class QMovableTabWidget : public QWidget
 {
 public:
@@ -72,6 +104,7 @@ public:
     QSize iconSize;
     QToolButton* rightB = nullptr; // right or bottom
     QToolButton* leftB = nullptr; // left or top
+    TabsMenuBtn* tabsMenuBtn = nullptr; // Adsk 3ds Max: Tab switch menu button
     QMovableTabWidget *movingTab = nullptr;
     int hoverIndex = -1;
     int switchTabCurrentIndex = -1;
@@ -100,6 +133,27 @@ public:
     bool documentMode : 1;
     bool autoHide : 1;
     bool changeCurrentOnDrag : 1;
+
+    bool multiRow = false; // Adsk 3ds Max
+    int lineCount = 0;
+    mutable struct {
+        int width;
+        int height;
+    } heightForWidthCache = { -1, -1 };
+
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    // Specifies additional flags that can be used to show / hide the
+    // left & right tab scroll buttons in combination with 
+    // the new tabs menu button.
+    //------------------------------------------------------------------
+    enum TabScrollOption {
+        TabScrollBtnsShown = 0x00001,
+        TabMenuBtnShown = 0x00002
+    };
+    Q_DECLARE_FLAGS( TabScrollOptions, TabScrollOption )
+
+    TabScrollOptions tabScrollBtnOptions = TabMenuBtnShown; // Adsk 3ds Max
 
     struct Tab {
         inline Tab(const QIcon &ico, const QString &txt)
@@ -136,6 +190,10 @@ public:
         int dragOffset = 0;
         uint enabled : 1;
         uint visible : 1;
+
+        int row = -1;
+        int rowIndex = -1;
+        bool isLastTabInRow = false;
 
 #if QT_CONFIG(animation)
         struct TabBarAnimation : public QVariantAnimation {

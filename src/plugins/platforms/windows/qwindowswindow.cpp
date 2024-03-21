@@ -2754,11 +2754,25 @@ void QWindowsWindow::propagateSizeHints()
 
 bool QWindowsWindow::handleGeometryChangingMessage(MSG *message, const QWindow *qWindow, const QMargins &margins)
 {
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max change: We disable here the SWP_NOCOPYBITS code that 
+    // has been introduced for Qt6 with the following commit:
+    // Windows QPA: Set SWP_NOCOPYBITS during resize to avoid jitter 
+    // https://git.autodesk.com/autodesk-forks/qtbase/commit/000f1ee3604048f693f2a9425948a37ec45b4301
+    //
+    // Disposing the old pixel data completely on the top level window causes
+    // flickering and performance degradation, since every native child window
+    // in the hierarchy needs to completely repaint its client area, recieving
+    // extra WM_NCPAINT, WM_ERASEBKGND and WM_PAINT messages. This occurs even
+    // on just window activation, z-order change, window move, where it would 
+    // be enough to re-blit the old content.
+    //-------------------------------------------------------------------------
+
     auto *windowPos = reinterpret_cast<WINDOWPOS *>(message->lParam);
 
     // Tell Windows to discard the entire contents of the client area, as re-using
     // parts of the client area would lead to jitter during resize.
-    windowPos->flags |= SWP_NOCOPYBITS;
+    // windowPos->flags |= SWP_NOCOPYBITS;
 
     if ((windowPos->flags & SWP_NOZORDER) == 0) {
         if (QWindowsWindow *platformWindow = QWindowsWindow::windowsWindowOf(qWindow)) {
@@ -2772,7 +2786,8 @@ bool QWindowsWindow::handleGeometryChangingMessage(MSG *message, const QWindow *
     }
     if (!qWindow->isTopLevel()) // Implement hasHeightForWidth().
         return false;
-    if (windowPos->flags & SWP_NOSIZE)
+    if ((windowPos->flags & (SWP_NOCOPYBITS | SWP_NOSIZE))) // Autodesk 3ds Max change: Revert to Qt5 if condition
+    // if (windowPos->flags & SWP_NOSIZE)
         return false;
     const QRect suggestedFrameGeometry(windowPos->x, windowPos->y,
                                        windowPos->cx, windowPos->cy);
@@ -2956,7 +2971,37 @@ void QWindowsWindow::requestActivateWindow()
                 }
             }
         }
-        SetForegroundWindow(m_data.hwnd);
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: When 3ds Max starts up we have a lot 
+        // of focus stealing issues of 3ds Max on other applications foreground
+        // windows. This is caused by the call to SetForegroundWindow() 
+        // whenever a Qt window gets focused / activated.
+        // To prevent this we make the SetForegroundWindow() call conditional 
+        // on a flag that 3ds Max can set when it is launching.
+        // Note that QWindow::requestActivate() offers a possiblity via the
+        // flag 'Qt::WindowDoesNotAcceptFocus' to suppress calls to 
+        // QWindowsWindow::requestActivateWindow() for that window, but using 
+        // the flag would disable both calls to SetForegroundWindow() and 
+        // SetFocus(), which is not useful in the case of 3ds Max, since it 
+        // can execute scripts on start up that popup Qt windows which rely 
+        // on the proper focus setting.
+        //------------------------------------------------------------------
+        bool doSetForegroundWnd = true;
+        if ( qApp )
+        {
+            auto prop = qApp->property( "_3dsmax_disableSetForegroundWnd" );
+            if ( prop.isValid() && prop.toBool() == true )
+            {
+                doSetForegroundWnd = false;
+            }
+        }
+
+        if ( doSetForegroundWnd )
+        {
+            SetForegroundWindow(m_data.hwnd);
+        }
+
         SetFocus(m_data.hwnd);
         if (attached)
             AttachThreadInput(foregroundThread, currentThread, FALSE);

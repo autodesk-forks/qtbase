@@ -318,6 +318,10 @@ public:
         SE_TabBarTearIndicatorRight,
 
         SE_PushButtonBevel,
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        //------------------------------------------------------------------
+        SE_TabBarTabsMenuButton,
 
         // do not add any values below/greater than this
         SE_CustomBase = 0xf0000000
@@ -533,6 +537,12 @@ public:
 
         PM_LineEditIconSize,
         PM_LineEditIconMargin,
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max addition: Tabs menu button
+        //------------------------------------------------------------------
+        PM_TabBarTabsMenuButtonWidth,
+        
         // do not add any values below/greater than this
         PM_CustomBase = 0xf0000000
     };

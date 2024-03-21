@@ -1510,7 +1510,15 @@ void QApplicationPrivate::setFocusWidget(QWidget *focus, Qt::FocusReason reason)
         else if (focus && reason == Qt::ShortcutFocusReason) {
             focus->window()->setAttribute(Qt::WA_KeyboardFocusChange);
         }
-        QWidget *prev = focus_widget;
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max change: In 3ds Max we discovered crashes in Qt
+        // when during the focus change widgets that are affected by the change
+        // get deleted. To avoid a crash we keep track of the widgets with
+        // a QPointer and skip the code if the pointer is already a nullptr.
+        //------------------------------------------------------------------
+        QPointer<QWidget> prev = focus_widget;
+        QPointer<QWidget> newFocus = focus;
         focus_widget = focus;
 
         if (focus_widget)
@@ -1532,7 +1540,7 @@ void QApplicationPrivate::setFocusWidget(QWidget *focus, Qt::FocusReason reason)
                 if (that)
                     QCoreApplication::sendEvent(that->style(), &out);
             }
-            if (focus && QApplicationPrivate::focus_widget == focus) {
+            if(newFocus && QApplicationPrivate::focus_widget == newFocus) {
                 QFocusEvent in(QEvent::FocusIn, reason);
                 QPointer<QWidget> that = focus;
                 QCoreApplication::sendEvent(focus, &in);
@@ -2725,18 +2733,27 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
                 w = w->parentWidget();
             }
             qt_in_tab_key_event = false;
-            break;
         }
-        case QEvent::MouseButtonPress:
-        case QEvent::MouseButtonRelease:
-        case QEvent::MouseButtonDblClick:
-        case QEvent::MouseMove: {
+        break;
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+        {
+            QWidget* w = static_cast<QWidget *>(receiver);
+            QPointer<QWidget> pw = w;
+
             QMouseEvent* mouse = static_cast<QMouseEvent*>(e);
             QPoint relpos = mouse->position().toPoint();
 
             if (e->spontaneous()) {
-                if (e->type() != QEvent::MouseMove)
+                if (e->type() != QEvent::MouseMove) {
                     QApplicationPrivate::giveFocusAccordingToFocusPolicy(w, e, relpos);
+                    if ( pw.isNull() ) {
+                        // receiver was deleted during the focus-event-handling
+                        break;
+                    }
+                }
 
                 // ### Qt 7 These dynamic tool tips should be an OPT-IN feature. Some platforms
                 // like macOS (probably others too), can optimize their views by not
@@ -2758,7 +2775,6 @@ bool QApplication::notify(QObject *receiver, QEvent *e)
 
             bool eventAccepted = mouse->isAccepted();
 
-            QPointer<QWidget> pw = w;
             while (w) {
                 QMouseEvent me(mouse->type(), relpos, mouse->scenePosition(), mouse->globalPosition().toPoint(),
                                mouse->button(), mouse->buttons(), mouse->modifiers(), mouse->source(),

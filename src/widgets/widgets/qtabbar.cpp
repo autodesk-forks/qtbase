@@ -21,6 +21,7 @@
 #include "qwhatsthis.h"
 #endif
 #include "private/qtextengine_p.h"
+#include "qmenu.h" // Adsk 3ds Max
 #if QT_CONFIG(accessibility)
 #include "qaccessible.h"
 #endif
@@ -69,6 +70,47 @@ void QMovableTabWidget::paintEvent(QPaintEvent *e)
     Q_UNUSED(e);
     QPainter p(this);
     p.drawPixmap(0, 0, m_pixmap);
+}
+
+namespace
+{
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Refactors some Qt hit test code out, that is used in several places.
+//------------------------------------------------------------------
+inline bool isMousePosInCornerButtons( QTabBarPrivate* d, const QPoint& pos )
+{
+    return (!d->leftB->isHidden() && d->leftB->geometry().contains( pos ))
+        || (!d->rightB->isHidden() && d->rightB->geometry().contains( pos ))
+        || (!d->tabsMenuBtn->isHidden() && d->tabsMenuBtn->geometry().contains( pos ));
+}
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// The extra width is defined by the width of the 3 tool buttons
+// left scroll / right scroll / tabs menu button and their distance
+// to each other. This can vary depending on their visibility.
+//------------------------------------------------------------------
+int extraButtonWidth( const QTabBarPrivate* d, const QTabBar* q )
+{
+    const int btnWidth = q->style()->pixelMetric( QStyle::PM_TabBarScrollButtonWidth, 0, q );
+    const int btnOverlap = q->style()->pixelMetric( QStyle::PM_TabBar_ScrollButtonOverlap, 0, q );
+
+    int extra = 0;
+    if ( d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabScrollBtnsShown ) )
+    {
+        extra = 2 * btnWidth - btnOverlap;
+    }
+
+    if ( d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabMenuBtnShown ) )
+    {
+        const int tabsMenuBtnWidth = q->style()->pixelMetric( QStyle::PM_TabBarTabsMenuButtonWidth, 0, q );
+        extra += tabsMenuBtnWidth - (d->tabScrollBtnOptions.testFlag( QTabBarPrivate::TabScrollBtnsShown ) ? btnOverlap : 0);
+    }
+
+    return extra;
+}
+
 }
 
 void QTabBarPrivate::updateMacBorderMetrics()
@@ -167,8 +209,11 @@ void QTabBarPrivate::initBasicStyleOption(QStyleOptionTab *option, int tabIndex)
     else
         option->selectedPosition = QStyleOptionTab::NotAdjacent;
 
-    const bool paintBeginning = (tabIndex == firstVisible) || (dragInProgress && tabIndex == pressedIndex + 1);
-    const bool paintEnd = (tabIndex == lastVisible) || (dragInProgress && tabIndex == pressedIndex - 1);
+    const bool paintBeginning = ((multiRow && (tab.rowIndex == 0)) || (!multiRow && tabIndex == firstVisible))
+            || (dragInProgress && tabIndex == pressedIndex + 1);
+    const bool paintEnd = ((multiRow && tab.isLastTabInRow) || (!multiRow && (tabIndex == lastVisible)))
+            || (dragInProgress && tabIndex == pressedIndex - 1);
+
     if (paintBeginning) {
         if (paintEnd)
             option->position = QStyleOptionTab::OnlyOneTab;
@@ -382,9 +427,14 @@ void QTabBarPrivate::init()
 #endif
         q->setFocusPolicy(Qt::TabFocus);
 
+    // Adsk 3ds Max: Adds the new tabs menu button.
+    tabsMenuBtn = new TabsMenuBtn( q );
+    tabsMenuBtn->hide();
+
 #if QT_CONFIG(accessibility)
     leftB->setAccessibleName(QTabBar::tr("Scroll Left"));
     rightB->setAccessibleName(QTabBar::tr("Scroll Right"));
+    tabsMenuBtn->setAccessibleName( QTabBar::tr( "Tabs Menu Button" ) );
 #endif
     q->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     elideMode = Qt::TextElideMode(q->style()->styleHint(QStyle::SH_TabBar_ElideMode, nullptr, q));
@@ -408,165 +458,326 @@ void QTabBarPrivate::layoutTabs()
     layoutDirty = false;
     QSize size = q->size();
     int last, available;
-    int maxExtent;
+    int maxExtent = 0;
     bool vertTabs = verticalTabs(shape);
     int tabChainIndex = 0;
     int hiddenTabs = 0;
 
     Qt::Alignment tabAlignment = Qt::Alignment(q->style()->styleHint(QStyle::SH_TabBar_Alignment, nullptr, q));
-    QList<QLayoutStruct> tabChain(tabList.size() + 2);
 
-    // We put an empty item at the front and back and set its expansive attribute
-    // depending on tabAlignment and expanding.
-    tabChain[tabChainIndex].init();
-    tabChain[tabChainIndex].expansive = (!expanding)
-                                        && (tabAlignment != Qt::AlignLeft)
-                                        && (tabAlignment != Qt::AlignJustify);
-    tabChain[tabChainIndex].empty = true;
-    ++tabChainIndex;
+    if (multiRow) {
 
-    // We now go through our list of tabs and set the minimum size and the size hint
-    // This will allow us to elide text if necessary. Since we don't set
-    // a maximum size, tabs will EXPAND to fill up the empty space.
-    // Since tab widget is rather *ahem* strict about keeping the geometry of the
-    // tab bar to its absolute minimum, this won't bleed through, but will show up
-    // if you use tab bar on its own (a.k.a. not a bug, but a feature).
-    // Update: if expanding is false, we DO set a maximum size to prevent the tabs
-    // being wider than necessary.
-    if (!vertTabs) {
-        int minx = 0;
-        int x = 0;
-        int maxHeight = 0;
-        for (int i = 0; i < tabList.size(); ++i) {
-            const auto tab = tabList.at(i);
-            if (!tab->visible) {
-                ++hiddenTabs;
-                continue;
+        if (rightB)
+            rightB->hide();
+        if (leftB)
+            leftB->hide();
+        if (tabsMenuBtn)
+            tabsMenuBtn->hide();
+
+        int currentSelRow = 0;
+        int tabOverlap = q->style()->pixelMetric(QStyle::PM_TabBarTabOverlap, nullptr, q);
+
+        QVector<QVector<int>> rowTabIndices;
+        {
+            int row = 0;
+            rowTabIndices.push_back(QVector<int>());
+            maxExtent = 0;
+            available = (vertTabs ? size.height() : size.width()) - tabOverlap;
+            last = 0;
+
+            for (int i = 0; i < tabList.count(); ++i) {
+                QSize sz = q->tabSizeHint(i);
+                if (i == 0) {
+                    // we always add the first tab - even if it may not fit
+                    last = vertTabs ? sz.height() : sz.width();
+                } else {
+                    last += vertTabs ? sz.height() : sz.width();
+                    if (last > available) {
+                        last = vertTabs ? sz.height() : sz.width();
+                        rowTabIndices.push_back(QVector<int>());
+                        ++row;
+                    }
+                }
+                maxExtent = qMax(maxExtent, vertTabs ? sz.width() : sz.height());
+                rowTabIndices[row].push_back(i);
+
+                if (currentIndex == i) {
+                    currentSelRow = row;
+                }
             }
-            QSize sz = q->tabSizeHint(i);
-            tab->maxRect = QRect(x, 0, sz.width(), sz.height());
-            x += sz.width();
-            maxHeight = qMax(maxHeight, sz.height());
-            sz = q->minimumTabSizeHint(i);
-            tab->minRect = QRect(minx, 0, sz.width(), sz.height());
-            minx += sz.width();
-            tabChain[tabChainIndex].init();
-            tabChain[tabChainIndex].sizeHint = tab->maxRect.width();
-            tabChain[tabChainIndex].minimumSize = sz.width();
-            tabChain[tabChainIndex].empty = false;
-            tabChain[tabChainIndex].expansive = true;
-
-            if (!expanding)
-                tabChain[tabChainIndex].maximumSize = tabChain[tabChainIndex].sizeHint;
-            ++tabChainIndex;
+            maxExtent -= tabOverlap;
         }
 
-        last = minx;
-        available = size.width();
-        maxExtent = maxHeight;
-    } else {
-        int miny = 0;
-        int y = 0;
-        int maxWidth = 0;
+        // we move the row containing the current tab next to the content
+        auto curRowVec = rowTabIndices[currentSelRow];
+        rowTabIndices.remove(currentSelRow);
+        // We revert the order of the rows for east to let the row order follow
+        // the reading direction of the lines.
+        if (shape == QTabBar::Shape::RoundedEast || shape == QTabBar::Shape::TriangularEast) {
+            std::reverse(rowTabIndices.begin(), rowTabIndices.end());
+        }
+        if (shape == QTabBar::RoundedNorth || shape == QTabBar::TriangularNorth
+            || shape == QTabBar::RoundedWest || shape == QTabBar::TriangularWest) {
+            rowTabIndices.push_back(curRowVec);
+        } else {
+            rowTabIndices.push_front(curRowVec);
+        }
+
+        for (int r = 0; r < rowTabIndices.count(); ++r) {
+            QVector<int> &rowVec = rowTabIndices[r];
+            tabChainIndex = 0;
+            QVector<QLayoutStruct> tabChain(rowVec.count() + 2);
+            // We put an empty item at the front and back and set its expansive attribute
+            // depending on tabAlignment and expanding.
+            tabChain[tabChainIndex].init();
+            tabChain[tabChainIndex].expansive = (!expanding) && (tabAlignment != Qt::AlignLeft)
+                    && (tabAlignment != Qt::AlignJustify);
+            tabChain[tabChainIndex].empty = true;
+            ++tabChainIndex;
+
+            int minx = 0;
+            int x = 0;
+
+            for (int ri = 0; ri < rowVec.count(); ++ri, ++tabChainIndex) {
+                int tabListIdx = rowVec[ri];
+                QTabBarPrivate::Tab &tab = *tabList.at(tabListIdx);
+                QSize sz = q->tabSizeHint(tabListIdx);
+                if (vertTabs) {
+                    tab.maxRect = QRect(maxExtent * r, x, sz.width(), sz.height());
+                    x += sz.height();
+                    sz = q->minimumTabSizeHint(tabListIdx);
+                    tab.minRect =
+                            QRect(maxExtent * r, minx, sz.width(), sz.height());
+                    minx += sz.height();
+                } else {
+                    tab.maxRect = QRect(x, maxExtent * r, sz.width(), sz.height());
+                    x += sz.width();
+                    sz = q->minimumTabSizeHint(tabListIdx);
+                    tab.minRect =
+                            QRect(minx, maxExtent * r, sz.width(), sz.height());
+                    minx += sz.width();
+                }
+                tabChain[tabChainIndex].init();
+                tabChain[tabChainIndex].sizeHint = vertTabs
+                        ? tab.maxRect.height()
+                        : tab.maxRect.width();
+                tabChain[tabChainIndex].minimumSize = vertTabs ? sz.height() : sz.width();
+                tabChain[tabChainIndex].empty = false;
+                tabChain[tabChainIndex].expansive = true;
+
+                if (!expanding)
+                    tabChain[tabChainIndex].maximumSize = tabChain[tabChainIndex].sizeHint;
+            }
+
+            last = minx;
+            available = ( vertTabs ? size.height() : size.width()) - tabOverlap;
+
+            // Mirror our front item.
+            tabChain[tabChainIndex].init();
+            tabChain[tabChainIndex].expansive = (!expanding) && (tabAlignment != Qt::AlignRight)
+                    && (tabAlignment != Qt::AlignJustify);
+            tabChain[tabChainIndex].empty = true;
+            Q_ASSERT(tabChainIndex == tabChain.count() - 1); // add an assert just to make sure.
+
+            // Do the calculation
+            qGeomCalc(tabChain, 0, tabChain.count(), 0, qMax(available, last), 0);
+            
+            // Use the results
+            for (int ri = 0; ri < rowVec.count(); ++ri) {
+                int tabListIdx = rowVec[ri];
+                QTabBarPrivate::Tab &tab = *tabList.at(tabListIdx);
+                const QLayoutStruct &lstruct = tabChain.at(ri + 1);
+                if (!vertTabs) {
+                    tab.rect.setRect(lstruct.pos, maxExtent * r, lstruct.size,
+                                                     tab.maxRect.height());
+                } else {
+                    tab.rect.setRect(maxExtent * r, lstruct.pos,
+                                                     tab.maxRect.width(),
+                                                     lstruct.size);
+                }
+                tab.rowIndex = ri;
+                tab.row = r;
+                tab.isLastTabInRow = (ri == (rowVec.count() - 1));
+            }
+        }
+
+        if (lineCount != rowTabIndices.count()) {
+            lineCount = rowTabIndices.count();
+            q->updateGeometry();
+        }
+    }
+    else 
+    { // single-row
+
+        QList<QLayoutStruct> tabChain(tabList.size() + 2);
+
+        // We put an empty item at the front and back and set its expansive attribute
+        // depending on tabAlignment and expanding.
+        tabChain[tabChainIndex].init();
+        tabChain[tabChainIndex].expansive = (!expanding)
+                                            && (tabAlignment != Qt::AlignLeft)
+                                            && (tabAlignment != Qt::AlignJustify);
+        tabChain[tabChainIndex].empty = true;
+        ++tabChainIndex;
+
+        // We now go through our list of tabs and set the minimum size and the size hint
+        // This will allow us to elide text if necessary. Since we don't set
+        // a maximum size, tabs will EXPAND to fill up the empty space.
+        // Since tab widget is rather *ahem* strict about keeping the geometry of the
+        // tab bar to its absolute minimum, this won't bleed through, but will show up
+        // if you use tab bar on its own (a.k.a. not a bug, but a feature).
+        // Update: if expanding is false, we DO set a maximum size to prevent the tabs
+        // being wider than necessary.
+        if (!vertTabs) {
+            int minx = 0;
+            int x = 0;
+            int maxHeight = 0;
+            for (int i = 0; i < tabList.size(); ++i) {
+                const auto tab = tabList.at(i);
+                if (!tab->visible) {
+                    ++hiddenTabs;
+                    continue;
+                }
+                QSize sz = q->tabSizeHint(i);
+                tab->maxRect = QRect(x, 0, sz.width(), sz.height());
+                x += sz.width();
+                maxHeight = qMax(maxHeight, sz.height());
+                sz = q->minimumTabSizeHint(i);
+                tab->minRect = QRect(minx, 0, sz.width(), sz.height());
+                minx += sz.width();
+                tabChain[tabChainIndex].init();
+                tabChain[tabChainIndex].sizeHint = tab->maxRect.width();
+                tabChain[tabChainIndex].minimumSize = sz.width();
+                tabChain[tabChainIndex].empty = false;
+                tabChain[tabChainIndex].expansive = true;
+
+                if (!expanding)
+                    tabChain[tabChainIndex].maximumSize = tabChain[tabChainIndex].sizeHint;
+                ++tabChainIndex;
+            }
+
+            last = minx;
+            available = size.width();
+            maxExtent = maxHeight;
+        } else {
+            int miny = 0;
+            int y = 0;
+            int maxWidth = 0;
+            for (int i = 0; i < tabList.size(); ++i) {
+                auto tab = tabList.at(i);
+                if (!tab->visible) {
+                    ++hiddenTabs;
+                    continue;
+                }
+                QSize sz = q->tabSizeHint(i);
+                tab->maxRect = QRect(0, y, sz.width(), sz.height());
+                y += sz.height();
+                maxWidth = qMax(maxWidth, sz.width());
+                sz = q->minimumTabSizeHint(i);
+                tab->minRect = QRect(0, miny, sz.width(), sz.height());
+                miny += sz.height();
+                tabChain[tabChainIndex].init();
+                tabChain[tabChainIndex].sizeHint = tab->maxRect.height();
+                tabChain[tabChainIndex].minimumSize = sz.height();
+                tabChain[tabChainIndex].empty = false;
+                tabChain[tabChainIndex].expansive = true;
+
+                if (!expanding)
+                    tabChain[tabChainIndex].maximumSize = tabChain[tabChainIndex].sizeHint;
+                ++tabChainIndex;
+            }
+
+            last = miny;
+            available = size.height();
+            maxExtent = maxWidth;
+        }
+
+        // Mirror our front item.
+        tabChain[tabChainIndex].init();
+        tabChain[tabChainIndex].expansive = (!expanding)
+                                            && (tabAlignment != Qt::AlignRight)
+                                            && (tabAlignment != Qt::AlignJustify);
+        tabChain[tabChainIndex].empty = true;
+        Q_ASSERT(tabChainIndex == tabChain.size() - 1 - hiddenTabs); // add an assert just to make sure.
+
+        // Do the calculation
+        qGeomCalc(tabChain, 0, tabChain.size(), 0, qMax(available, last), 0);
+
+        // Use the results
+        hiddenTabs = 0;
         for (int i = 0; i < tabList.size(); ++i) {
             auto tab = tabList.at(i);
             if (!tab->visible) {
+                tab->rect = QRect();
                 ++hiddenTabs;
                 continue;
             }
-            QSize sz = q->tabSizeHint(i);
-            tab->maxRect = QRect(0, y, sz.width(), sz.height());
-            y += sz.height();
-            maxWidth = qMax(maxWidth, sz.width());
-            sz = q->minimumTabSizeHint(i);
-            tab->minRect = QRect(0, miny, sz.width(), sz.height());
-            miny += sz.height();
-            tabChain[tabChainIndex].init();
-            tabChain[tabChainIndex].sizeHint = tab->maxRect.height();
-            tabChain[tabChainIndex].minimumSize = sz.height();
-            tabChain[tabChainIndex].empty = false;
-            tabChain[tabChainIndex].expansive = true;
-
-            if (!expanding)
-                tabChain[tabChainIndex].maximumSize = tabChain[tabChainIndex].sizeHint;
-            ++tabChainIndex;
+            const QLayoutStruct &lstruct = tabChain.at(i + 1 - hiddenTabs);
+            if (!vertTabs)
+                tab->rect.setRect(lstruct.pos, 0, lstruct.size, maxExtent);
+            else
+                tab->rect.setRect(0, lstruct.pos, maxExtent, lstruct.size);
         }
 
-        last = miny;
-        available = size.height();
-        maxExtent = maxWidth;
-    }
+        if (useScrollButtons && tabList.size() && last > available) {
+            const QRect scrollRect = normalizedScrollRect(0);
+            scrollOffset = -scrollRect.left();
 
-    // Mirror our front item.
-    tabChain[tabChainIndex].init();
-    tabChain[tabChainIndex].expansive = (!expanding)
-                                        && (tabAlignment != Qt::AlignRight)
-                                        && (tabAlignment != Qt::AlignJustify);
-    tabChain[tabChainIndex].empty = true;
-    Q_ASSERT(tabChainIndex == tabChain.size() - 1 - hiddenTabs); // add an assert just to make sure.
+            Q_Q(QTabBar);
+            QStyleOption opt;
+            opt.initFrom(q);
+            QRect scrollButtonLeftRect = q->style()->subElementRect(QStyle::SE_TabBarScrollLeftButton, &opt, q);
+            QRect scrollButtonRightRect = q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
+            int scrollButtonWidth = q->style()->pixelMetric(QStyle::PM_TabBarScrollButtonWidth, &opt, q);
 
-    // Do the calculation
-    qGeomCalc(tabChain, 0, tabChain.size(), 0, qMax(available, last), 0);
+            // Adsk 3ds Max
+            QRect tabsMenuButtonRect =
+                    q->style()->subElementRect(QStyle::SE_TabBarTabsMenuButton, &opt, q);
 
-    // Use the results
-    hiddenTabs = 0;
-    for (int i = 0; i < tabList.size(); ++i) {
-        auto tab = tabList.at(i);
-        if (!tab->visible) {
-            tab->rect = QRect();
-            ++hiddenTabs;
-            continue;
-        }
-        const QLayoutStruct &lstruct = tabChain.at(i + 1 - hiddenTabs);
-        if (!vertTabs)
-            tab->rect.setRect(lstruct.pos, 0, lstruct.size, maxExtent);
-        else
-            tab->rect.setRect(0, lstruct.pos, maxExtent, lstruct.size);
-    }
+            // Normally SE_TabBarScrollLeftButton should have the same width as PM_TabBarScrollButtonWidth.
+            // But if that is not the case, we set the actual button width to PM_TabBarScrollButtonWidth, and
+            // use the extra space from SE_TabBarScrollLeftButton as margins towards the tabs.
+            if (vertTabs) {
+                scrollButtonLeftRect.setHeight(scrollButtonWidth);
+                scrollButtonRightRect.setY(scrollButtonRightRect.bottom() + 1 - scrollButtonWidth);
+                scrollButtonRightRect.setHeight(scrollButtonWidth);
+                leftB->setArrowType(Qt::UpArrow);
+                rightB->setArrowType(Qt::DownArrow);
+            } else if (q->layoutDirection() == Qt::RightToLeft) {
+                scrollButtonRightRect.setWidth(scrollButtonWidth);
+                scrollButtonLeftRect.setX(scrollButtonLeftRect.right() + 1 - scrollButtonWidth);
+                scrollButtonLeftRect.setWidth(scrollButtonWidth);
+                leftB->setArrowType(Qt::RightArrow);
+                rightB->setArrowType(Qt::LeftArrow);
+            } else {
+                scrollButtonLeftRect.setWidth(scrollButtonWidth);
+                scrollButtonRightRect.setX(scrollButtonRightRect.right() + 1 - scrollButtonWidth);
+                scrollButtonRightRect.setWidth(scrollButtonWidth);
+                leftB->setArrowType(Qt::LeftArrow);
+                rightB->setArrowType(Qt::RightArrow);
+            }
 
-    if (useScrollButtons && tabList.size() && last > available) {
-        const QRect scrollRect = normalizedScrollRect(0);
+            if (tabScrollBtnOptions.testFlag(TabScrollBtnsShown)) {
+                leftB->setGeometry(scrollButtonLeftRect);
+                leftB->setEnabled(false);
+                leftB->show();
 
-        Q_Q(QTabBar);
-        QStyleOption opt;
-        opt.initFrom(q);
-        QRect scrollButtonLeftRect = q->style()->subElementRect(QStyle::SE_TabBarScrollLeftButton, &opt, q);
-        QRect scrollButtonRightRect = q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
-        int scrollButtonWidth = q->style()->pixelMetric(QStyle::PM_TabBarScrollButtonWidth, &opt, q);
+                rightB->setGeometry(scrollButtonRightRect);
+                rightB->setEnabled(last - scrollOffset > scrollRect.x() + scrollRect.width());
+                rightB->show();
+            }
 
-        // Normally SE_TabBarScrollLeftButton should have the same width as PM_TabBarScrollButtonWidth.
-        // But if that is not the case, we set the actual button width to PM_TabBarScrollButtonWidth, and
-        // use the extra space from SE_TabBarScrollLeftButton as margins towards the tabs.
-        if (vertTabs) {
-            scrollButtonLeftRect.setHeight(scrollButtonWidth);
-            scrollButtonRightRect.setY(scrollButtonRightRect.bottom() + 1 - scrollButtonWidth);
-            scrollButtonRightRect.setHeight(scrollButtonWidth);
-            leftB->setArrowType(Qt::UpArrow);
-            rightB->setArrowType(Qt::DownArrow);
-        } else if (q->layoutDirection() == Qt::RightToLeft) {
-            scrollButtonRightRect.setWidth(scrollButtonWidth);
-            scrollButtonLeftRect.setX(scrollButtonLeftRect.right() + 1 - scrollButtonWidth);
-            scrollButtonLeftRect.setWidth(scrollButtonWidth);
-            leftB->setArrowType(Qt::RightArrow);
-            rightB->setArrowType(Qt::LeftArrow);
+            // Adsk 3ds Max: Update the new tabs menu button.
+            if (tabScrollBtnOptions.testFlag(TabMenuBtnShown)) {
+                tabsMenuBtn->setGeometry(tabsMenuButtonRect);
+                tabsMenuBtn->show();
+            }
         } else {
-            scrollButtonLeftRect.setWidth(scrollButtonWidth);
-            scrollButtonRightRect.setX(scrollButtonRightRect.right() + 1 - scrollButtonWidth);
-            scrollButtonRightRect.setWidth(scrollButtonWidth);
-            leftB->setArrowType(Qt::LeftArrow);
-            rightB->setArrowType(Qt::RightArrow);
+            scrollOffset = 0;
+            rightB->hide();
+            leftB->hide();
+            tabsMenuBtn->hide(); // Adsk 3ds Max
         }
-
-        leftB->setGeometry(scrollButtonLeftRect);
-        leftB->setEnabled(false);
-        leftB->show();
-
-        rightB->setGeometry(scrollButtonRightRect);
-        rightB->setEnabled(last + scrollRect.left() > scrollRect.x() + scrollRect.width());
-        rightB->show();
-    } else {
-        rightB->hide();
-        leftB->hide();
     }
 
     layoutWidgets();
@@ -583,17 +794,28 @@ QRect QTabBarPrivate::normalizedScrollRect(int index)
     Q_Q(QTabBar);
     // If scrollbuttons are not visible, then there's no tear either, and
     // the entire widget is the scroll rect.
-    if (leftB->isHidden())
+    if (leftB->isHidden() && tabsMenuBtn->isHidden())
         return verticalTabs(shape) ? q->rect().transposed() : q->rect();
 
     QStyleOptionTab opt;
     q->initStyleOption(&opt, currentIndex);
     opt.rect = q->rect();
 
-    QRect scrollButtonLeftRect = q->style()->subElementRect(QStyle::SE_TabBarScrollLeftButton, &opt, q);
-    QRect scrollButtonRightRect = q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
+    QRect scrollButtonLeftRect =
+            q->style()->subElementRect(QStyle::SE_TabBarScrollLeftButton, &opt, q);
+    QRect scrollButtonRightRect =
+            q->style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, q);
     QRect tearLeftRect = q->style()->subElementRect(QStyle::SE_TabBarTearIndicatorLeft, &opt, q);
     QRect tearRightRect = q->style()->subElementRect(QStyle::SE_TabBarTearIndicatorRight, &opt, q);
+
+    // Adsk 3ds Max
+    // If only the tabs menu button is shown, we use this button as reference
+    // for scroll rect calculation.
+    if (tabScrollBtnOptions == TabMenuBtnShown) {
+        QRect tabsMenuButtonRect =
+                q->style()->subElementRect(QStyle::SE_TabBarTabsMenuButton, &opt, q);
+        scrollButtonLeftRect = scrollButtonRightRect = tabsMenuButtonRect;
+    }
 
     if (verticalTabs(shape)) {
         int topEdge, bottomEdge;
@@ -665,7 +887,7 @@ int QTabBarPrivate::hoveredTabIndex() const
 void QTabBarPrivate::makeVisible(int index)
 {
     Q_Q(QTabBar);
-    if (!validIndex(index))
+    if (!validIndex(index) || (leftB->isHidden() && tabsMenuBtn->isHidden()))
         return;
 
     const QRect tabRect = tabList.at(index)->rect;
@@ -821,10 +1043,13 @@ void QTabBarPrivate::_q_scrollTabs()
 void QTabBarPrivate::refresh()
 {
     Q_Q(QTabBar);
-
+    if (multiRow) {
+        heightForWidthCache = { -1, -1 };
+    }
     // be safe in case a subclass is also handling move with the tabs
     if (pressedIndex != -1
         && movable
+        && !multiRow
         && mouseButtons == Qt::NoButton) {
         moveTabFinished(pressedIndex);
         if (!validIndex(pressedIndex))
@@ -992,6 +1217,7 @@ int QTabBar::insertTab(int index, const QIcon& icon, const QString &text)
         d->hoverRect = tabRect(index);
     }
 
+    d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
     tabInserted(index);
     d->autoHideTabs();
     return index;
@@ -1087,6 +1313,7 @@ void QTabBar::removeTab(int index)
                 d->hoverRect = QRect();
             }
         }
+        d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
         tabRemoved(index);
     }
 }
@@ -1434,6 +1661,11 @@ void QTabBar::setCurrentIndex(int index)
             QAccessible::updateAccessibility(&selectionEvent);
         }
 #endif
+        if (d->multiRow) {
+            // put current tab in front
+            d->layoutTabs();
+        }
+
         emit currentChanged(index);
     }
 }
@@ -1501,6 +1733,13 @@ QSize QTabBar::minimumSizeHint() const
     Q_D(const QTabBar);
     if (d->layoutDirty)
         const_cast<QTabBarPrivate*>(d)->layoutTabs();
+    if (d->multiRow) {
+        QSize s;
+        for (int i = 0; i < d->tabList.count(); ++i) {
+            s = s.expandedTo(minimumTabSizeHint(i));
+        }
+        return s;
+    }
     if (!d->useScrollButtons) {
         QRect r;
         for (const auto tab : d->tabList) {
@@ -1510,9 +1749,95 @@ QSize QTabBar::minimumSizeHint() const
         return r.size();
     }
     if (verticalTabs(d->shape))
-        return QSize(sizeHint().width(), d->rightB->sizeHint().height() * 2 + 75);
+        return QSize( sizeHint().width(), extraButtonWidth( d, this ) + 75 );
     else
-        return QSize(d->rightB->sizeHint().width() * 2 + 75, sizeHint().height());
+        return QSize( extraButtonWidth( d, this ) + 75, sizeHint().height() );
+}
+
+int QTabBar::heightForWidth(int width) const
+{
+    Q_D(const QTabBar);
+    if (!d->multiRow || verticalTabs(d->shape)) {
+        return -1;
+    }
+
+    if (!d->layoutDirty && d->heightForWidthCache.width == width) {
+        return d->heightForWidthCache.height;
+    }
+
+    int x = 0;
+    int maxHeight = 0;
+    int rows = 1;
+    int totalHeight = 0;
+
+    for (int i = 0; i < d->tabList.count(); ++i) {
+        QSize sz = tabSizeHint(i);
+        if (i == 0) {
+            // we always add the first tab - even if it may not fit
+            x = sz.width();
+        } else {
+            x += sz.width();
+            if (x > width) {
+                x = sz.width();
+                ++rows;
+            }
+        }
+        maxHeight = qMax(maxHeight, sz.height());
+    }
+
+    int tabOverlap = style()->pixelMetric(QStyle::PM_TabBarTabOverlap, nullptr, this);
+    totalHeight = qMax(0, ((maxHeight - tabOverlap) * rows) + tabOverlap);
+
+    d->heightForWidthCache.width = width;
+    d->heightForWidthCache.height = totalHeight;
+
+    return totalHeight;
+}
+
+bool QTabBar::hasHeightForWidth() const
+{
+    Q_D(const QTabBar);
+    return d->multiRow && !verticalTabs(d->shape);
+}
+
+int QTabBar::widthForHeight(int height) const
+{
+    Q_D(const QTabBar);
+    if (!d->multiRow || !verticalTabs(d->shape)) {
+        return -1;
+    }
+
+    if (!d->layoutDirty && d->heightForWidthCache.height == height) {
+        return d->heightForWidthCache.width;
+    }
+
+    int y = 0;
+    int maxWidth = 0;
+    int rows = 1;
+    int totalWidth = 0;
+
+    for (int i = 0; i < d->tabList.count(); ++i) {
+        QSize sz = tabSizeHint(i);
+        if (i == 0) {
+            // we always add the first tab - even if it may not fit
+            y = sz.height();
+        } else {
+            y += sz.height();
+            if (y > height) {
+                y = sz.height();
+                ++rows;
+            }
+        }
+        maxWidth = qMax(maxWidth, sz.width());
+    }
+
+    int tabOverlap = style()->pixelMetric(QStyle::PM_TabBarTabOverlap, nullptr, this);
+    totalWidth = qMax(0, ((maxWidth - tabOverlap) * rows) + tabOverlap);
+
+    d->heightForWidthCache.height = height;
+    d->heightForWidthCache.width = totalWidth;
+
+    return totalWidth;
 }
 
 // Compute the most-elided possible text, for minimumSizeHint
@@ -1674,7 +1999,23 @@ bool QTabBar::event(QEvent *event)
     case QEvent::HoverEnter: {
         QHoverEvent *he = static_cast<QHoverEvent *>(event);
         d->mousePosition = he->position().toPoint();
-        if (!d->hoverRect.contains(d->mousePosition)) {
+
+        //------------------------------------------------------------------
+        // Autodesk 3ds Max modification: Tabs menu button
+        // No hover on the tabs when we are on the left/right/tabmenu buttons.
+        //------------------------------------------------------------------
+        if ( isMousePosInCornerButtons( d, d->mousePosition ) )
+        {
+            // Clear old tab hover rect.
+            if ( d->hoverRect.isValid() )
+            {
+                QRect oldHoverRect = d->hoverRect;
+                d->hoverIndex = -1;
+                d->hoverRect = QRect();
+                update( oldHoverRect );
+            }
+        }
+        else if (!d->hoverRect.contains(d->mousePosition)) {
             if (d->hoverRect.isValid())
                 update(d->hoverRect);
             d->hoverIndex = tabAt(d->mousePosition);
@@ -1772,6 +2113,27 @@ bool QTabBar::event(QEvent *event)
         d->mousePosition = static_cast<QMouseEvent *>(event)->position().toPoint();
         d->mouseButtons = static_cast<QMouseEvent *>(event)->buttons();
         break;
+
+    //------------------------------------------------------------------
+    // Autodesk 3ds Max addition: Tabs menu button
+    // Sync dynamic 3ds Max property for the tab scroll options with
+    // the internal flag.
+    //------------------------------------------------------------------
+    case QEvent::DynamicPropertyChange:
+    {
+        auto pe = static_cast< QDynamicPropertyChangeEvent* >( event );
+        if ( pe->propertyName() == "_3dsmax_tab_scroll_options" )
+        {
+            auto prop = property( "_3dsmax_tab_scroll_options" );
+            if ( prop.isValid())
+            {
+                d->tabScrollBtnOptions = (QTabBarPrivate::TabScrollOptions)prop.toInt();
+                d->refresh();
+            }
+        }
+        break;
+    }
+
     default:
         break;
     }
@@ -1824,7 +2186,7 @@ void QTabBar::paintEvent(QPaintEvent *)
 
     // the buttons might be semi-transparent or not fill their rect, but we don't
     // want the tab underneath to shine through, so clip the button area; QTBUG-50866
-    if (d->leftB->isVisible() || d->rightB->isVisible()) {
+    if (d->leftB->isVisible() || d->rightB->isVisible() || d->tabsMenuBtn->isVisible()) {
         QStyleOption opt;
         opt.initFrom(this);
         QRegion buttonRegion;
@@ -1832,6 +2194,8 @@ void QTabBar::paintEvent(QPaintEvent *)
             buttonRegion |= style()->subElementRect(QStyle::SE_TabBarScrollLeftButton, &opt, this);
         if (d->rightB->isVisible())
             buttonRegion |= style()->subElementRect(QStyle::SE_TabBarScrollRightButton, &opt, this);
+        if (d->tabsMenuBtn->isVisible())
+            buttonRegion |= style()->subElementRect(QStyle::SE_TabBarTabsMenuButton, &opt, this);
         if (!buttonRegion.isEmpty())
             p.setClipRegion(QRegion(rect()) - buttonRegion);
     }
@@ -1901,13 +2265,13 @@ void QTabBar::paintEvent(QPaintEvent *)
     }
 
     // Only draw the tear indicator if necessary. Most of the time we don't need too.
-    if (d->leftB->isVisible() && cutLeft >= 0) {
+    if ( (d->leftB->isVisible() || d->tabsMenuBtn->isVisible()) && cutLeft >= 0) {
         cutTabLeft.rect = rect();
         cutTabLeft.rect = style()->subElementRect(QStyle::SE_TabBarTearIndicatorLeft, &cutTabLeft, this);
         p.drawPrimitive(QStyle::PE_IndicatorTabTearLeft, cutTabLeft);
     }
 
-    if (d->rightB->isVisible() && cutRight >= 0) {
+    if ( (d->rightB->isVisible() || d->tabsMenuBtn->isVisible()) && cutRight >= 0) {
         cutTabRight.rect = rect();
         cutTabRight.rect = style()->subElementRect(QStyle::SE_TabBarTearIndicatorRight, &cutTabRight, this);
         p.drawPrimitive(QStyle::PE_IndicatorTabTearRight, cutTabRight);
@@ -2072,6 +2436,9 @@ void QTabBar::moveTab(int from, int to)
 
     d->layoutWidgets(start);
     update();
+
+    d->tabsMenuBtn->tabOrderChanged(); // Adsk 3ds Max
+
     emit tabMoved(from, to);
     if (previousIndex != d->currentIndex)
         emit currentChanged(d->currentIndex);
@@ -2112,9 +2479,8 @@ void QTabBar::mousePressEvent(QMouseEvent *event)
     Q_D(QTabBar);
 
     const QPoint pos = event->position().toPoint();
-    const bool isEventInCornerButtons = (!d->leftB->isHidden() && d->leftB->geometry().contains(pos))
-                                     || (!d->rightB->isHidden() && d->rightB->geometry().contains(pos));
-    if (!isEventInCornerButtons) {
+
+    if ( !isMousePosInCornerButtons( d, pos ) ) {
         const int index = d->indexAtPos(pos);
         emit tabBarClicked(index);
     }
@@ -2124,7 +2490,7 @@ void QTabBar::mousePressEvent(QMouseEvent *event)
         return;
     }
     // Be safe!
-    if (d->pressedIndex != -1 && d->movable)
+    if (d->pressedIndex != -1 && (d->movable && !d->multiRow))
         d->moveTabFinished(d->pressedIndex);
 
     d->pressedIndex = d->indexAtPos(event->position().toPoint());
@@ -2137,7 +2503,7 @@ void QTabBar::mousePressEvent(QMouseEvent *event)
             setCurrentIndex(d->pressedIndex);
         else
             repaint(tabRect(d->pressedIndex));
-        if (d->movable) {
+        if (d->movable && !d->multiRow) {
             d->dragStartPosition = event->position().toPoint();
         }
     }
@@ -2148,7 +2514,7 @@ void QTabBar::mousePressEvent(QMouseEvent *event)
 void QTabBar::mouseMoveEvent(QMouseEvent *event)
 {
     Q_D(QTabBar);
-    if (d->movable) {
+    if (d->movable && !d->multiRow) {
         // Be safe!
         if (d->pressedIndex != -1
             && event->buttons() == Qt::NoButton)
@@ -2259,6 +2625,9 @@ void QTabBarPrivate::setupMovableTab()
         leftB->raise();
     if (rightB)
         rightB->raise();
+    if ( tabsMenuBtn ) // Adsk 3ds Max
+        tabsMenuBtn->raise();
+
     movingTab->setVisible(true);
 }
 
@@ -2281,7 +2650,7 @@ void QTabBarPrivate::moveTabFinished(int index)
         for (auto tab : std::as_const(tabList)) {
             tab->dragOffset = 0;
         }
-        if (pressedIndex != -1 && movable) {
+        if (pressedIndex != -1 && (movable && !multiRow)) {
             pressedIndex = -1;
             dragInProgress = false;
             dragStartPosition = QPoint();
@@ -2304,8 +2673,7 @@ void QTabBar::mouseReleaseEvent(QMouseEvent *event)
         event->ignore();
         return;
     }
-
-    if (d->movable && d->dragInProgress && d->validIndex(d->pressedIndex)) {
+    if ((d->movable && !d->multiRow) && d->dragInProgress && d->validIndex(d->pressedIndex)) {
         int length = d->tabList.at(d->pressedIndex)->dragOffset;
         int width = verticalTabs(d->shape)
             ? tabRect(d->pressedIndex).height()
@@ -2339,9 +2707,7 @@ void QTabBar::mouseDoubleClickEvent(QMouseEvent *event)
 {
     Q_D(QTabBar);
     const QPoint pos = event->position().toPoint();
-    const bool isEventInCornerButtons = (!d->leftB->isHidden() && d->leftB->geometry().contains(pos))
-                                        || (!d->rightB->isHidden() && d->rightB->geometry().contains(pos));
-    if (!isEventInCornerButtons)
+    if ( !isMousePosInCornerButtons( d, pos ) )
         emit tabBarDoubleClicked(tabAt(pos));
 
     mousePressEvent(event);
@@ -2762,6 +3128,37 @@ void QTabBar::setChangeCurrentOnDrag(bool change)
 }
 
 /*!
+    \property QTabBar::multiRow
+    \brief If true, then the layout of the tabs is automatically broken into
+    multiple rows, if it doesn't fit into one row.
+    \since 5.12.4 3ds Max
+
+    \note This feature is an addition by Autodesk used in 3ds Max.
+
+    By default, this property is false.
+*/
+
+bool QTabBar::multiRow() const
+{
+    Q_D(const QTabBar);
+    return d->multiRow;
+}
+
+void QTabBar::setMultiRow(bool multiRow)
+{
+    Q_D(QTabBar);
+    if (d->multiRow != multiRow) {
+        d->layoutDirty = true;
+        d->scrollOffset = 0;
+        d->multiRow = multiRow;
+        d->layoutTabs();
+        d->refresh();
+        update();
+        updateGeometry();
+    }
+}
+
+/*!
     Sets \a widget on the tab \a index.  The widget is placed
     on the left or right hand side depending on the \a position.
     \since 4.5
@@ -2912,6 +3309,120 @@ void QTabBarPrivate::Tab::TabBarAnimation::updateState(QAbstractAnimation::State
     if (newState == Stopped) priv->moveTabFinished(priv->tabList.indexOf(tab));
 }
 #endif
+
+
+//------------------------------------------------------------------
+// Autodesk 3ds Max addition: Tabs menu button
+// Adds a new tool button to the tab left / right scroll buttons
+// which opens up a quick select menu containing all tabs.
+//------------------------------------------------------------------
+TabsMenuBtn::TabsMenuBtn( QTabBar* parent )
+    : QToolButton( parent ), mTabBar( parent )
+{
+    setObjectName( QLatin1String( "_3dsmax_tabbar_tabs_menu_button" ) );
+    setPopupMode( QToolButton::InstantPopup );
+    setArrowType( Qt::DownArrow );
+
+    mTabsMenu = new QMenu( this );
+    setMenu( mTabsMenu );
+
+    QObject::connect( mTabsMenu, &QMenu::triggered, this, &TabsMenuBtn::tabsMenuActionTriggered );
+    QObject::connect( mTabsMenu, &QMenu::aboutToShow, this, &TabsMenuBtn::tabsMenuAboutToShow );
+    QObject::connect( mTabBar, &QTabBar::currentChanged, this, &TabsMenuBtn::currentTabChanged );
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabsMenuActionTriggered( QAction* action )
+{
+    int idx = action->data().toInt();
+
+    if ( idx >= 0 && idx < mTabBar->count() )
+    {
+        mTabBar->setCurrentIndex( idx );
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabsMenuAboutToShow()
+{
+    if ( mTabOrderDirty )
+    {
+        // Update complete menu.
+        updateTabsMenu();
+        mTabOrderDirty = false;
+        mCurTabDirty = false;
+    }
+    else if ( mCurTabDirty )
+    {
+        // Update just current tab selection.
+        // Set a bold font for the current tab menu item.
+        int idx = mTabBar->currentIndex();
+
+        for ( auto a : mTabsMenu->actions() )
+        {
+            QFont f = a->font();
+            f.setBold( a->data().toInt() == idx );
+            a->setFont( f );
+        }
+
+        mCurTabDirty = false;
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::updateTabsMenu()
+{
+    int curIdx = mTabBar->currentIndex();
+    mTabsMenu->clear();
+    
+    for ( int idx = 0; idx < mTabBar->count(); ++idx )
+    {
+        auto tabName = mTabBar->tabText( idx );
+        auto icon = mTabBar->tabIcon( idx );
+        auto action = mTabsMenu->addAction( icon, tabName );
+        action->setData( idx );
+        // Set a bold font for the current tab menu item.
+        if ( idx == curIdx )
+        {
+            QFont f = action->font();
+            f.setBold( true );
+            action->setFont( f );
+        }
+    }
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::paintEvent( QPaintEvent* evt )
+{
+    Q_UNUSED( evt );
+    QStylePainter p( this );
+    QStyleOptionToolButton opt;
+    initStyleOption( &opt );
+
+    // Remove menu flag for not showing the little corner triangle.
+    opt.features &= ~QStyleOptionToolButton::HasMenu;
+
+    p.drawComplexControl( QStyle::CC_ToolButton, opt );
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::currentTabChanged()
+{
+    mCurTabDirty = true;
+}
+
+//------------------------------------------------------------------
+//------------------------------------------------------------------
+void TabsMenuBtn::tabOrderChanged()
+{
+    mTabOrderDirty = true;
+}
+
 
 QT_END_NAMESPACE
 

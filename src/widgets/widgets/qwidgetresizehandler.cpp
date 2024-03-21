@@ -4,6 +4,7 @@
 #include "qwidgetresizehandler_p.h"
 
 #include "qframe.h"
+#include "qdockwidget.h"
 #include "qapplication.h"
 #include "private/qwidget_p.h"
 #include "qcursor.h"
@@ -29,8 +30,26 @@ QWidgetResizeHandler::QWidgetResizeHandler(QWidget *parent, QWidget *cw)
 {
     mode = Nowhere;
     widget->setMouseTracking(true);
-    QFrame *frame = qobject_cast<QFrame*>(widget);
-    range = frame ? frame->frameWidth() : RANGE;
+    //-------------------------------------------------------------------------
+    // Autodesk 3ds Max Change: QWidgetResizeHandler is used by the QDockWidget,
+    // but the dockwidget's frame width is not taken into account here and always
+    // refers to the hardcoded non-dpi aware RANGE value of 4. This is far to less
+    // and the user has problems in grabbing the resize handles. So we change the
+    // range here to the actual dockwidgets frame width, which is implemented by
+    // the style.
+    //-------------------------------------------------------------------------
+    if (QFrame* frame = qobject_cast<QFrame*>(widget))
+    {
+        range = frame->frameWidth();
+    }
+    else if (QDockWidget* dockwidget = qobject_cast<QDockWidget*>(widget))
+    {
+        range = dockwidget->style()->pixelMetric(QStyle::PM_DockWidgetFrameWidth, nullptr, dockwidget);
+    }
+    else
+    {
+        range = RANGE;
+    }
     range = qMax(RANGE, range);
     enabled = true;
     widget->installEventFilter(this);

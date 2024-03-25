@@ -220,6 +220,8 @@ public:
     void setSharedPainter(QPainter *painter);
     QWidgetRepaintManager *maybeRepaintManager() const;
 
+    QRhi *rhi() const;
+
     enum class WindowHandleMode {
         Direct,
         Closest,
@@ -632,6 +634,8 @@ public:
     static void setWidgetParentHelper(QObject *widgetAsObject, QObject *newParent);
 
     std::string flagsForDumping() const override;
+
+    QWidget *closestParentWidgetWithWindowHandle() const;
 
     // Variables.
     // Regular pointers (keep them together to avoid gaps on 64 bit architectures).

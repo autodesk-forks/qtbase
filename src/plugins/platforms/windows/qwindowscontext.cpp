@@ -1026,16 +1026,18 @@ bool QWindowsContext::windowsProc(HWND hwnd, UINT message,
             const bool darkMode = QWindowsTheme::queryDarkMode();
             const bool darkModeChanged = darkMode != QWindowsContextPrivate::m_darkMode;
             QWindowsContextPrivate::m_darkMode = darkMode;
-            auto integration = QWindowsIntegration::instance();
-            integration->updateApplicationBadge();
-            if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle)) {
-                QWindowsTheme::instance()->refresh();
-                QWindowSystemInterface::handleThemeChange();
-            }
-            if (darkModeChanged) {
-                if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeWindowFrames)) {
-                    for (QWindowsWindow *w : d->m_windows)
-                        w->setDarkBorder(QWindowsContextPrivate::m_darkMode);
+            if (auto integration = QWindowsIntegration::instance())  // integration may be null during shutdown
+            {
+                integration->updateApplicationBadge();
+                if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle)) {
+                    QWindowsTheme::instance()->refresh();
+                    QWindowSystemInterface::handleThemeChange();
+                }
+                if (darkModeChanged) {
+                    if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeWindowFrames)) {
+                        for (QWindowsWindow* w : d->m_windows)
+                            w->setDarkBorder(QWindowsContextPrivate::m_darkMode);
+                    }
                 }
             }
         }

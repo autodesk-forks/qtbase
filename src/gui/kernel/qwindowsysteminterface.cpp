@@ -95,6 +95,9 @@ template<>
 template<typename EventType, typename ...Args>
 bool QWindowSystemHelper<QWindowSystemInterface::SynchronousDelivery>::handleEvent(Args ...args)
 {
+    // fix FUS-146926 with a null check for QGuiApplication::instance()
+    if (!QGuiApplication::instance())
+        return false;
     if (QThread::currentThread() == QGuiApplication::instance()->thread()) {
         EventType event(args...);
         // Process the event immediately on the Gui thread and return the accepted state

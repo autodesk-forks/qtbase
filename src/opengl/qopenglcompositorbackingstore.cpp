@@ -141,7 +141,11 @@ void QOpenGLCompositorBackingStore::flush(QWindow *window, const QRegion &region
     Q_UNUSED(region);
     Q_UNUSED(offset);
 
-    m_rhi = rhi(window);
+    m_rhi = rhi();
+    if (!m_rhi) {
+        setRhiConfig(QPlatformBackingStoreRhiConfig(QPlatformBackingStoreRhiConfig::OpenGL));
+        m_rhi = rhi();
+    }
     Q_ASSERT(m_rhi);
 
     QOpenGLCompositor *compositor = QOpenGLCompositor::instance();
@@ -177,7 +181,11 @@ QPlatformBackingStore::FlushResult QOpenGLCompositorBackingStore::rhiFlush(QWind
     Q_UNUSED(translucentBackground);
     Q_UNUSED(sourceDevicePixelRatio);
 
-    m_rhi = rhi(window);
+    m_rhi = rhi();
+    if (!m_rhi) {
+        setRhiConfig(QPlatformBackingStoreRhiConfig(QPlatformBackingStoreRhiConfig::OpenGL));
+        m_rhi = rhi();
+    }
     Q_ASSERT(m_rhi);
 
     QOpenGLCompositor *compositor = QOpenGLCompositor::instance();

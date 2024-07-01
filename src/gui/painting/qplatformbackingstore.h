@@ -40,8 +40,6 @@ class QRhiSwapChain;
 
 struct Q_GUI_EXPORT QPlatformBackingStoreRhiConfig
 {
-    Q_GADGET
-public:
     enum Api {
         OpenGL,
         Metal,
@@ -49,7 +47,6 @@ public:
         D3D11,
         Null
     };
-    Q_ENUM(Api)
 
     QPlatformBackingStoreRhiConfig()
         : m_enable(false)
@@ -173,11 +170,11 @@ public:
     virtual void beginPaint(const QRegion &);
     virtual void endPaint();
 
-    void createRhi(QWindow *window, QPlatformBackingStoreRhiConfig config = {});
-    QRhi *rhi(QWindow *window) const;
-
+    void setRhiConfig(const QPlatformBackingStoreRhiConfig &config);
+    QRhi *rhi() const;
+    QRhiSwapChain *rhiSwapChain() const;
     void surfaceAboutToBeDestroyed();
-    void graphicsDeviceReportedLost(QWindow *window);
+    void graphicsDeviceReportedLost();
 
 private:
     QPlatformBackingStorePrivate *d_ptr;

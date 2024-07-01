@@ -24,8 +24,6 @@
 #include <QtGui/private/qvulkandefaultinstance_p.h>
 #endif
 
-#include <QtGui/private/qrhinull_p.h>
-
 QT_BEGIN_NAMESPACE
 
 Q_DECLARE_LOGGING_CATEGORY(lcQpaBackingStore)
@@ -67,11 +65,6 @@ bool QBackingStoreRhiSupport::create()
     QRhi *rhi = nullptr;
     QOffscreenSurface *surface = nullptr;
     QRhi::Flags flags;
-
-    if (m_config.api() == QPlatformBackingStoreRhiConfig::Null) {
-        QRhiNullInitParams params;
-        rhi = QRhi::create(QRhi::Null, &params, flags);
-    }
 
 #if QT_CONFIG(opengl)
     if (!rhi && m_config.api() == QPlatformBackingStoreRhiConfig::OpenGL) {

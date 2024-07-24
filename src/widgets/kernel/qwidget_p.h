@@ -367,8 +367,6 @@ public:
     void showChildren(bool spontaneous);
     void hideChildren(bool spontaneous);
     void setParent_sys(QWidget *parent, Qt::WindowFlags);
-    void reparentWidgetWindows(QWidget *parentWithWindow, Qt::WindowFlags windowFlags = {});
-    void reparentWidgetWindowChildren(QWidget *parentWithWindow);
     void scroll_sys(int dx, int dy);
     void scroll_sys(int dx, int dy, const QRect &r);
     void deactivateWidgetCleanup();
@@ -634,8 +632,6 @@ public:
     static void setWidgetParentHelper(QObject *widgetAsObject, QObject *newParent);
 
     std::string flagsForDumping() const override;
-
-    QWidget *closestParentWidgetWithWindowHandle() const;
 
     // Variables.
     // Regular pointers (keep them together to avoid gaps on 64 bit architectures).

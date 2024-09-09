@@ -1682,7 +1682,11 @@ static void deleteBackingStore(QWidgetPrivate *d)
 
 void QWidgetPrivate::deleteTLSysExtra()
 {
+    Q_Q(QWidget);
     if (extra && extra->topextra) {
+        if (extra->hasWindowContainer)
+            QWindowContainer::toplevelAboutToBeDestroyed(q);
+
         //the qplatformbackingstore may hold a reference to the window, so the backingstore
         //needs to be deleted first.
 

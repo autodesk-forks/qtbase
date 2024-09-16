@@ -1026,6 +1026,34 @@ void QWidgetPrivate::createRecursively()
     }
 }
 
+QRhi *QWidgetPrivate::rhi() const
+{
+    Q_Q(const QWidget);
+    if (auto *backingStore = q->backingStore()) {
+        auto *window = windowHandle(WindowHandleMode::Closest);
+        return backingStore->handle()->rhi(window);
+    } else {
+        return nullptr;
+    }
+}
+
+/*!
+    \internal
+    Returns the closest parent widget that has a QWindow window handle
+
+    \note This behavior is different from nativeParentWidget(), which
+    returns the closest parent that has a QWindow window handle with
+    a created QPlatformWindow, and hence native window (winId).
+*/
+QWidget *QWidgetPrivate::closestParentWidgetWithWindowHandle() const
+{
+    Q_Q(const QWidget);
+    QWidget *parent = q->parentWidget();
+    while (parent && !parent->windowHandle())
+        parent = parent->parentWidget();
+    return parent;
+}
+
 QWindow *QWidgetPrivate::windowHandle(WindowHandleMode mode) const
 {
     if (mode == WindowHandleMode::Direct || mode == WindowHandleMode::Closest) {
@@ -1035,6 +1063,7 @@ QWindow *QWidgetPrivate::windowHandle(WindowHandleMode mode) const
         }
     }
     if (mode == WindowHandleMode::Closest) {
+        // FIXME: Use closestParentWidgetWithWindowHandle instead
         if (auto nativeParent = q_func()->nativeParentWidget()) {
             if (auto window = nativeParent->windowHandle())
                 return window;
@@ -1085,8 +1114,15 @@ static bool q_evaluateRhiConfigRecursive(const QWidget *w, QPlatformBackingStore
     }
     for (const QObject *child : w->children()) {
         if (const QWidget *childWidget = qobject_cast<const QWidget *>(child)) {
-            if (q_evaluateRhiConfigRecursive(childWidget, outConfig, outType))
+            if (q_evaluateRhiConfigRecursive(childWidget, outConfig, outType)) {
+                static bool optOut = qEnvironmentVariableIsSet("QT_WIDGETS_NO_CHILD_RHI");
+                // Native child widgets should not trigger RHI for its parent
+                // hierarchy, but will still flush the native child using RHI.
+                if (!optOut && childWidget->testAttribute(Qt::WA_NativeWindow))
+                    continue;
+
                 return true;
+            }
         }
     }
     return false;
@@ -1331,19 +1367,19 @@ void QWidgetPrivate::create()
     QBackingStore *store = q->backingStore();
     usesRhiFlush = false;
 
-    if (!store) {
-        if (q->windowType() != Qt::Desktop) {
-            if (q->isWindow()) {
-                q->setBackingStore(new QBackingStore(win));
-                QPlatformBackingStoreRhiConfig rhiConfig;
-                usesRhiFlush = q_evaluateRhiConfig(q, &rhiConfig, nullptr);
-                topData()->backingStore->handle()->setRhiConfig(rhiConfig);
-            }
-        } else {
-            q->setAttribute(Qt::WA_PaintOnScreen, true);
+    if (q->windowType() == Qt::Desktop) {
+        q->setAttribute(Qt::WA_PaintOnScreen, true);
+    } else {
+        if (!store && q->isWindow())
+            q->setBackingStore(new QBackingStore(win));
+
+        QPlatformBackingStoreRhiConfig rhiConfig;
+        usesRhiFlush = q_evaluateRhiConfig(q, &rhiConfig, nullptr);
+        if (usesRhiFlush && q->backingStore()) {
+            // Trigger creation of support infrastructure up front,
+            // now that we have a specific RHI configuration.
+            q->backingStore()->handle()->createRhi(win, rhiConfig);
         }
-    } else if (win->handle()) {
-        usesRhiFlush = q_evaluateRhiConfig(q, nullptr, nullptr);
     }
 
     setWindowModified_helper();
@@ -10634,7 +10670,7 @@ void QWidget::setParent(QWidget *parent)
     setParent((QWidget*)parent, windowFlags() & ~Qt::WindowType_Mask);
 }
 
-static void sendWindowChangeToTextureChildrenRecursively(QWidget *widget, QEvent::Type eventType)
+void qSendWindowChangeToTextureChildrenRecursively(QWidget *widget, QEvent::Type eventType)
 {
     QWidgetPrivate *d = QWidgetPrivate::get(widget);
     if (d->renderToTexture) {
@@ -10645,7 +10681,7 @@ static void sendWindowChangeToTextureChildrenRecursively(QWidget *widget, QEvent
     for (int i = 0; i < d->children.size(); ++i) {
         QWidget *w = qobject_cast<QWidget *>(d->children.at(i));
         if (w && !w->isWindow())
-            sendWindowChangeToTextureChildrenRecursively(w, eventType);
+            qSendWindowChangeToTextureChildrenRecursively(w, eventType);
     }
 
     // Notify QWidgetWindow after we've notified all child QWidgets
@@ -10683,6 +10719,8 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
     const bool resized = testAttribute(Qt::WA_Resized);
     const bool wasCreated = testAttribute(Qt::WA_WState_Created);
     QWidget *oldtlw = window();
+    Q_ASSERT(oldtlw);
+    QWidget *oldParentWithWindow = d->closestParentWidgetWithWindowHandle();
 
     if (f & Qt::Window) // Frame geometry likely changes, refresh.
         d->data.fstrut_dirty = true;
@@ -10712,8 +10750,9 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
 
     // texture-based widgets need a pre-notification when their associated top-level window changes
     // This is not under the wasCreated/newParent conditions above in order to also play nice with QDockWidget.
-    if ((oldtlw && oldtlw->d_func()->usesRhiFlush) && ((!parent && parentWidget()) || (parent && parent->window() != oldtlw)))
-        sendWindowChangeToTextureChildrenRecursively(this, QEvent::WindowAboutToChangeInternal);
+    const bool oldParentUsesRhiFlush = oldParentWithWindow ? oldParentWithWindow->d_func()->usesRhiFlush : false;
+    if (oldParentUsesRhiFlush && ((!parent && parentWidget()) || (parent && parent->window() != oldtlw)))
+        qSendWindowChangeToTextureChildrenRecursively(this, QEvent::WindowAboutToChangeInternal);
 
     // If we get parented into another window, children will be folded
     // into the new parent's focus chain, so clear focus now.
@@ -10793,8 +10832,8 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
 
     // texture-based widgets need another event when their top-level window
     // changes (more precisely, has already changed at this point)
-    if ((oldtlw && oldtlw->d_func()->usesRhiFlush) && oldtlw != window())
-        sendWindowChangeToTextureChildrenRecursively(this, QEvent::WindowChangeInternal);
+    if (oldParentUsesRhiFlush && oldtlw != window())
+        qSendWindowChangeToTextureChildrenRecursively(this, QEvent::WindowChangeInternal);
 
     if (!wasCreated) {
         if (isWindow() || parentWidget()->isVisible())
@@ -10821,27 +10860,47 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
     if (d->extra && d->extra->hasWindowContainer)
         QWindowContainer::parentWasChanged(this);
 
-    QWidget *newtlw = window();
-    if (oldtlw != newtlw) {
+    QWidget *newParentWithWindow = d->closestParentWidgetWithWindowHandle();
+    if (newParentWithWindow && newParentWithWindow != oldParentWithWindow) {
+        // Check if the native parent now needs to switch to RHI
+        qCDebug(lcWidgetPainting) << "Evaluating whether reparenting of" << this
+              << "into" << parent << "requires RHI enablement for" << newParentWithWindow;
+
+        QPlatformBackingStoreRhiConfig rhiConfig;
         QSurface::SurfaceType surfaceType = QSurface::RasterSurface;
-        // Only evaluate the reparented subtree. While it might be tempting to
-        // do it on newtlw instead, the performance implications of that are
+
+        // First evaluate whether the reparented widget uses RHI.
+        // We do this as a separate step because the performance
+        // implications of always checking the native parent are
         // problematic when it comes to large widget trees.
-        if (q_evaluateRhiConfig(this, nullptr, &surfaceType)) {
-            newtlw->d_func()->usesRhiFlush = true;
-            bool recreate = false;
-            if (QWindow *w = newtlw->windowHandle()) {
-                if (w->surfaceType() != surfaceType)
-                    recreate = true;
-            }
-            // QTBUG-115652: Besides the toplevel the nativeParentWidget()'s QWindow must be checked as well.
-            if (QWindow *w = d->windowHandle(QWidgetPrivate::WindowHandleMode::Closest)) {
-                if (w->surfaceType() != surfaceType)
-                    recreate = true;
-            }
-            if (recreate) {
-                newtlw->destroy();
-                newtlw->create();
+        if (q_evaluateRhiConfig(this, &rhiConfig, &surfaceType)) {
+            // Then check whether the native parent requires RHI
+            // as a result. It may not, if this widget is a native
+            // window, and can handle its own RHI flushing.
+            if (q_evaluateRhiConfig(newParentWithWindow, nullptr, nullptr)) {
+                // Finally, check whether we need to recreate the
+                // native parent to enable RHI flushing.
+                auto *existingWindow = newParentWithWindow->windowHandle();
+                auto existingSurfaceType = existingWindow->surfaceType();
+                if (existingSurfaceType != surfaceType) {
+                    qCDebug(lcWidgetPainting)
+                        << "Recreating" << existingWindow
+                        << "with current type" << existingSurfaceType
+                        << "to support" << surfaceType;
+                    const auto windowStateBeforeDestroy = newParentWithWindow->windowState();
+                    const auto visibilityBeforeDestroy = newParentWithWindow->isVisible();
+                    newParentWithWindow->destroy();
+                    newParentWithWindow->create();
+                    Q_ASSERT(newParentWithWindow->windowHandle());
+                    newParentWithWindow->windowHandle()->setWindowStates(windowStateBeforeDestroy);
+                    QWidgetPrivate::get(newParentWithWindow)->setVisible(visibilityBeforeDestroy);
+                } else if (auto *backingStore = newParentWithWindow->backingStore()) {
+                    // If we don't recreate we still need to make sure the native parent
+                    // widget has a RHI config that the reparented widget can use.
+                    backingStore->handle()->createRhi(existingWindow, rhiConfig);
+                    // And that it knows it's now flushing with RHI
+                    QWidgetPrivate::get(newParentWithWindow)->usesRhiFlush = true;
+                }
             }
         }
     }
@@ -12248,8 +12307,10 @@ QBackingStore *QWidget::backingStore() const
     if (extra && extra->backingStore)
         return extra->backingStore;
 
-    QWidgetRepaintManager *repaintManager = d->maybeRepaintManager();
-    return repaintManager ? repaintManager->backingStore() : nullptr;
+    if (!isWindow())
+        return window()->backingStore();
+
+    return nullptr;
 }
 
 void QWidgetPrivate::getLayoutItemMargins(int *left, int *top, int *right, int *bottom) const

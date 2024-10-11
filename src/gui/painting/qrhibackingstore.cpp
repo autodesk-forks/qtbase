@@ -19,7 +19,10 @@ void QRhiBackingStore::flush(QWindow *window, const QRegion &region, const QPoin
     Q_UNUSED(region);
     Q_UNUSED(offset);
 
-    if (!rhi(window)) {
+    if (window != this->window())
+        return;
+
+    if (!rhi()) {
         QPlatformBackingStoreRhiConfig rhiConfig;
         switch (window->surfaceType()) {
         case QSurface::OpenGLSurface:
@@ -28,18 +31,11 @@ void QRhiBackingStore::flush(QWindow *window, const QRegion &region, const QPoin
         case QSurface::MetalSurface:
             rhiConfig.setApi(QPlatformBackingStoreRhiConfig::Metal);
             break;
-        case QSurface::Direct3DSurface:
-            rhiConfig.setApi(QPlatformBackingStoreRhiConfig::D3D11);
-            break;
-        case QSurface::VulkanSurface:
-            rhiConfig.setApi(QPlatformBackingStoreRhiConfig::Vulkan);
-            break;
         default:
             Q_UNREACHABLE();
         }
-
         rhiConfig.setEnabled(true);
-        createRhi(window, rhiConfig);
+        setRhiConfig(rhiConfig);
     }
 
     static QPlatformTextureList emptyTextureList;

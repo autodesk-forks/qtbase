@@ -17,7 +17,6 @@ QBackingStoreDefaultCompositor::~QBackingStoreDefaultCompositor()
 
 void QBackingStoreDefaultCompositor::reset()
 {
-    m_rhi = nullptr;
     delete m_psNoBlend;
     m_psNoBlend = nullptr;
     delete m_psBlend;

@@ -259,6 +259,7 @@ public:
     int stretchSections;
     int contentsSections;
     int defaultSectionSize;
+    int oldDefaultSectionSize = -1;
     int minimumSectionSize;
     int maximumSectionSize;
     int lastSectionSize;

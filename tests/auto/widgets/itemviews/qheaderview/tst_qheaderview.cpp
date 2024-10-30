@@ -3282,6 +3282,10 @@ void tst_QHeaderView::resizeToContentTest()
     QCOMPARE(hh->sectionSize(3), 200);
     hh->setMaximumSectionSize(-1);
 
+    // give all sections a zero-size, so that setDefaultSectionSize resets their size
+    for (int u = 0; u < view->count(); ++u)
+        view->resizeSection(u, 0);
+
     view->setDefaultSectionSize(25); // To make sure our precalced data are correct. We do not know font height etc.
 
     const int precalced_results[] =  { -1523279360, -1523279360, -1347156568, 1, 1719705216, 1719705216, 12500 };

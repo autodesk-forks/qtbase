@@ -1320,7 +1320,7 @@ QRhi::FrameOpResult QRhiD3D11::endFrame(QRhiSwapChain *swapChain, QRhi::EndFrame
         if (swapChainD->swapInterval == 0 && (swapChainD->swapChainFlags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING))
             presentFlags |= DXGI_PRESENT_ALLOW_TEARING;
         HRESULT hr = swapChainD->swapChain->Present(swapChainD->swapInterval, presentFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in Present()");
             deviceLost = true;
             return QRhi::FrameOpDeviceLost;
@@ -4738,8 +4738,12 @@ void QD3D11SwapChain::destroy()
     }
 
     QRHI_RES_RHI(QRhiD3D11);
-    if (rhiD)
+    if (rhiD) {
         rhiD->unregisterResource(this);
+        // See Deferred Destruction Issues with Flip Presentation Swap Chains in
+        // https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush
+        rhiD->context->Flush();
+    }
 }
 
 QRhiCommandBuffer *QD3D11SwapChain::currentFrameCommandBuffer()
@@ -5090,7 +5094,7 @@ bool QD3D11SwapChain::createOrResize()
         // flip model -> buffer count is the real buffer count, not 1 like with the legacy modes
         hr = swapChain->ResizeBuffers(UINT(BUFFER_COUNT), UINT(pixelSize.width()), UINT(pixelSize.height()),
                                       colorFormat, swapChainFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in ResizeBuffers()");
             rhiD->deviceLost = true;
             return false;

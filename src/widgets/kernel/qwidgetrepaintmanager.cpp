@@ -1093,6 +1093,8 @@ void QWidgetRepaintManager::flush(QWidget *widget, const QRegion &region, QPlatf
             qSendWindowChangeToTextureChildrenRecursively(widget->window(),
                                                           QEvent::WindowChangeInternal);
             widget->update();
+            // Widget textures are deleted in WindowChange. The list should not contain dangling pointers.
+            QWidgetPrivate::get(tlw)->topData()->widgetTextures.clear();
         }
     } else {
         qCInfo(lcWidgetPainting) << "Flushing" << region << "of" << widget;

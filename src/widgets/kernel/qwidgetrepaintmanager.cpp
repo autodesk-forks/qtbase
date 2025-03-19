@@ -1087,8 +1087,14 @@ void QWidgetRepaintManager::flush(QWidget *widget, const QRegion &region, QPlatf
                                                 translucentBackground);
         widgetWindowPrivate->sendComposeStatus(widget->window(), true);
         if (flushResult == QPlatformBackingStore::FlushFailedDueToLostDevice) {
+            qSendWindowChangeToTextureChildrenRecursively(widget->window(),
+                                                          QEvent::WindowAboutToChangeInternal);
             store->handle()->graphicsDeviceReportedLost();
+            qSendWindowChangeToTextureChildrenRecursively(widget->window(),
+                                                          QEvent::WindowChangeInternal);
             widget->update();
+            // Widget textures are deleted in WindowChange. The list should not contain dangling pointers.
+            QWidgetPrivate::get(tlw)->topData()->widgetTextures.clear();
         }
     } else {
         qCInfo(lcWidgetPainting) << "Flushing" << region << "of" << widget;

@@ -17,6 +17,7 @@ QBackingStoreDefaultCompositor::~QBackingStoreDefaultCompositor()
 
 void QBackingStoreDefaultCompositor::reset()
 {
+    m_rhi = nullptr;
     delete m_psNoBlend;
     m_psNoBlend = nullptr;
     delete m_psBlend;
@@ -113,7 +114,12 @@ QRhiTexture *QBackingStoreDefaultCompositor::toTexture(const QImage &sourceImage
             m_texture = rhi->newTexture(QRhiTexture::RGBA8, image.size());
         else
             m_texture->setPixelSize(image.size());
-        m_texture->create();
+        if (!m_texture->create()) {
+            qWarning("QBackingStoreDefaultCompositor: Failed to create backing store texture");
+            delete m_texture;
+            m_texture = nullptr;
+            return nullptr;
+        }
         resourceUpdates->uploadTexture(m_texture, image);
     } else {
         QRect imageRect = image.rect();
@@ -342,16 +348,22 @@ QBackingStoreDefaultCompositor::PerQuadData QBackingStoreDefaultCompositor::crea
     PerQuadData d;
 
     d.ubuf = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer, UBUF_SIZE);
-    if (!d.ubuf->create())
+    if (!d.ubuf->create()) {
         qWarning("QBackingStoreDefaultCompositor: Failed to create uniform buffer");
+        d.reset();
+        return d;
+    }
 
     d.srb = m_rhi->newShaderResourceBindings();
     d.srb->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, d.ubuf, 0, UBUF_SIZE),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, texture, m_samplerNearest)
     });
-    if (!d.srb->create())
+    if (!d.srb->create()) {
         qWarning("QBackingStoreDefaultCompositor: Failed to create srb");
+        d.reset();
+        return d;
+    }
     d.lastUsedTexture = texture;
 
     if (textureExtra) {
@@ -360,8 +372,11 @@ QBackingStoreDefaultCompositor::PerQuadData QBackingStoreDefaultCompositor::crea
             QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, d.ubuf, 0, UBUF_SIZE),
             QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, textureExtra, m_samplerNearest)
         });
-        if (!d.srbExtra->create())
+        if (!d.srbExtra->create()) {
             qWarning("QBackingStoreDefaultCompositor: Failed to create srb");
+            d.reset();
+            return d;
+        }
     }
 
     d.lastUsedTextureExtra = textureExtra;
@@ -405,6 +420,8 @@ void QBackingStoreDefaultCompositor::updateUniforms(PerQuadData *d, QRhiResource
                                                     const QMatrix4x4 &target, const QMatrix3x3 &source,
                                                     UpdateUniformOptions options)
 {
+    if (!d->isValid())
+        return;
     resourceUpdates->updateDynamicBuffer(d->ubuf, 0, 64, target.constData());
     updateMatrix3x3(resourceUpdates, d->ubuf, source);
     float opacity = 1.0f;
@@ -482,6 +499,8 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
 
     if (!qt_window_private(window)->receivedExpose)
         return QPlatformBackingStore::FlushSuccess;
+    if (!swapchain)
+        return QPlatformBackingStore::FlushFailed;
 
     qCDebug(lcQpaBackingStore) << "Composing and flushing" << region << "of" << window
                                << "at offset" << offset << "with" << textures->count() << "texture(s) in" << textures
@@ -545,7 +564,7 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
     const bool invertTargetY = !rhi->isYUpInNDC();
     const bool invertSource = !rhi->isYUpInFramebuffer();
 
-    if (m_texture) {
+    if (m_texture && m_widgetQuadData.isValid()) {
         // The backingstore is for the entire tlw. In case of native children, offset tells the position
         // relative to the tlw. The window rect is scaled by the source device pixel ratio to get
         // the source rect.
@@ -607,6 +626,8 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
     cb->resourceUpdate(resourceUpdates);
 
     auto render = [&](std::optional<QRhiSwapChain::StereoTargetBuffer> buffer = std::nullopt) {
+        if (!m_psNoBlend || !m_psBlend || !m_psPremulBlend)
+            return;
         QRhiRenderTarget* target = nullptr;
         if (buffer.has_value())
             target = swapchain->currentFrameRenderTarget(buffer.value());
@@ -672,7 +693,11 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
     } else
         render();
 
-    rhi->endFrame(swapchain);
+    frameResult = rhi->endFrame(swapchain);
+    if (frameResult == QRhi::FrameOpDeviceLost)
+        return QPlatformBackingStore::FlushFailedDueToLostDevice;
+    if (frameResult != QRhi::FrameOpSuccess)
+        return QPlatformBackingStore::FlushFailed;
 
     return QPlatformBackingStore::FlushSuccess;
 }

@@ -168,13 +168,14 @@ bool QRhiD3D11::create(QRhi::Flags flags)
     if (qEnvironmentVariableIntValue("QT_D3D_FLIP_DISCARD"))
         qWarning("The default swap effect is FLIP_DISCARD, QT_D3D_FLIP_DISCARD is now ignored");
 
-    if (qEnvironmentVariableIntValue("QT_D3D_NO_FLIP"))
-        qWarning("Non-FLIP swapchains are no longer supported, QT_D3D_NO_FLIP is now ignored");
+    // Support for flip model swapchains is required now (since we are
+    // targeting Windows 10+), but the option for using the old model is still
+    // there. (some features are not supported then, however)
+    useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP");
 
-    qCDebug(QRHI_LOG_INFO, "FLIP_* swapchain supported = true, ALLOW_TEARING supported = %s",
-            supportsAllowTearing ? "true" : "false");
-
-    qCDebug(QRHI_LOG_INFO, "Default swap effect: FLIP_DISCARD");
+    qCDebug(QRHI_LOG_INFO, "FLIP_* swapchain supported = true, ALLOW_TEARING supported = %s, use legacy (non-FLIP) model = %s",
+            supportsAllowTearing ? "true" : "false",
+            useLegacySwapchainModel ? "true" : "false");
 
     if (!importedDeviceAndContext) {
         IDXGIAdapter1 *adapter;
@@ -1318,7 +1319,7 @@ QRhi::FrameOpResult QRhiD3D11::endFrame(QRhiSwapChain *swapChain, QRhi::EndFrame
             return QRhi::FrameOpError;
         }
         HRESULT hr = swapChainD->swapChain->Present(swapChainD->swapInterval, presentFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in Present()");
             deviceLost = true;
             return QRhi::FrameOpDeviceLost;
@@ -4736,8 +4737,12 @@ void QD3D11SwapChain::destroy()
     }
 
     QRHI_RES_RHI(QRhiD3D11);
-    if (rhiD)
+    if (rhiD) {
         rhiD->unregisterResource(this);
+        // See Deferred Destruction Issues with Flip Presentation Swap Chains in
+        // https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush
+        rhiD->context->Flush();
+    }
 }
 
 QRhiCommandBuffer *QD3D11SwapChain::currentFrameCommandBuffer()
@@ -4935,7 +4940,7 @@ bool QD3D11SwapChain::createOrResize()
     QRHI_RES_RHI(QRhiD3D11);
 
     if (m_flags.testFlag(SurfaceHasPreMulAlpha) || m_flags.testFlag(SurfaceHasNonPreMulAlpha)) {
-        if (rhiD->ensureDirectCompositionDevice()) {
+        if (!rhiD->useLegacySwapchainModel && rhiD->ensureDirectCompositionDevice()) {
             if (!dcompTarget) {
                 hr = rhiD->dcompDevice->CreateTargetForHwnd(hwnd, true, &dcompTarget);
                 if (FAILED(hr)) {
@@ -5014,8 +5019,8 @@ bool QD3D11SwapChain::createOrResize()
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = BUFFER_COUNT;
         desc.Flags = swapChainFlags;
-        desc.Scaling = DXGI_SCALING_NONE;
-        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        desc.Scaling = rhiD->useLegacySwapchainModel ? DXGI_SCALING_STRETCH : DXGI_SCALING_NONE;
+        desc.SwapEffect = rhiD->useLegacySwapchainModel ? DXGI_SWAP_EFFECT_DISCARD : DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
         if (dcompVisual) {
             // With DirectComposition setting AlphaMode to STRAIGHT fails the
@@ -5088,7 +5093,7 @@ bool QD3D11SwapChain::createOrResize()
         // flip model -> buffer count is the real buffer count, not 1 like with the legacy modes
         hr = swapChain->ResizeBuffers(UINT(BUFFER_COUNT), UINT(pixelSize.width()), UINT(pixelSize.height()),
                                       colorFormat, swapChainFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in ResizeBuffers()");
             rhiD->deviceLost = true;
             return false;

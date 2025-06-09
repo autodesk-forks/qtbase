@@ -901,10 +901,18 @@ Qt::DockWidgetArea QDockWidgetPrivate::toDockWidgetArea(QInternal::DockPosition 
 
 void QDockWidgetPrivate::setResizerActive(bool active)
 {
-#ifdef Q_OS_WINDOWS
-    Q_UNUSED(active);
-#else
     Q_Q(QDockWidget);
+#ifdef Q_OS_WINDOWS
+    //Q_UNUSED(active);
+    // Create resize handler manually on Windows for floating widgets with custom title bars
+    // to fix a regression in Qt 6.5.5 (FUS-203364)
+    if (q->isFloating() && q->titleBarWidget()) {
+        if (active && !resizer)
+            resizer = new QWidgetResizeHandler(q);
+        if (resizer)
+            resizer->setEnabled(active);
+    }
+#else
     if (active && !resizer)
         resizer = new QWidgetResizeHandler(q);
     if (resizer)

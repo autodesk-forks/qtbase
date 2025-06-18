@@ -346,6 +346,25 @@ QT_NAMESPACE_ALIAS_OBJC_CLASS(QNSViewMouseMoveHelper);
     if (candidate == self) {
         if ([self isTransparentForUserInput])
             return nil;
+            
+        // Check if the point is outside the mask region - if so, act transparent
+        if (m_platformWindow && m_platformWindow->window()) {
+            QRegion mask = QHighDpi::toNativeLocalPosition(m_platformWindow->window()->mask(), m_platformWindow->window());
+            if (!mask.isEmpty()) {
+                QPointF qtWindowPoint;
+                QPointF qtScreenPoint;
+                NSPoint screenPoint = [self.window convertRectToScreen:NSMakeRect(aPoint.x, aPoint.y, 1, 1)].origin;
+                [self convertFromScreen:screenPoint toWindowPoint:&qtWindowPoint andScreenPoint:&qtScreenPoint];
+                
+                const bool mouseOutsideMask = !mask.contains(qtWindowPoint.toPoint());
+                
+                if (mouseOutsideMask) {
+                    qCDebug(lcQpaMouse) << "HIT TEST: Mouse outside mask at" << qtWindowPoint.toPoint() 
+                                    << "- returning nil (transparent)";
+                    return nil;  // Act as if this view is transparent
+                }
+            }
+        }
     }
     return candidate;
 }

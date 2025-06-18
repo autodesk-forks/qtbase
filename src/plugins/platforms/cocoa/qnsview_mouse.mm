@@ -513,8 +513,22 @@ static const QPointingDevice *pointingDeviceFor(qint64 deviceID)
 
     if (m_platformWindow->isContentView()) {
         [self convertFromScreen:[self screenMousePoint:theEvent] toWindowPoint:&windowPoint andScreenPoint:&screenPoint];
+        
+        // Check if this window should be considered "under mouse" based on mask region
+        QRegion mask = QHighDpi::toNativeLocalPosition(m_platformWindow->window()->mask(), m_platformWindow->window());
+        const bool mouseOutsideMask = !mask.isEmpty() && !mask.contains(windowPoint.toPoint());
+        
+        if (mouseOutsideMask) {
+            // Mouse is outside mask region - this window should act transparent
+            // Do NOT interfere with s_windowUnderMouse tracking - let underlying windows handle it
+            qCDebug(lcQpaMouse) << "MASK TRANSPARENCY: Mouse outside mask at" << windowPoint.toPoint() 
+                               << "- not participating in window tracking";
+            return; // Exit early, don't interfere with underlying window tracking
+        }
+        
+        // Mouse is inside mask region - normal behavior
         QWindow *childUnderMouse = m_platformWindow->childWindowAt(windowPoint.toPoint());
-        QCocoaWindow *childWindow = static_cast<QCocoaWindow *>(childUnderMouse->handle());
+        QCocoaWindow *childWindow = childUnderMouse ? static_cast<QCocoaWindow *>(childUnderMouse->handle()) : nullptr;
         if (childWindow != QCocoaWindow::s_windowUnderMouse) {
             if (QCocoaWindow::s_windowUnderMouse)
                 windowToLeave = QCocoaWindow::s_windowUnderMouse;
@@ -529,10 +543,18 @@ static const QPointingDevice *pointingDeviceFor(qint64 deviceID)
         return;
 
     if (windowToLeave) {
-        qCInfo(lcQpaMouse) << "Detected new window under mouse at" << windowPoint << "; sending"
-                           << QEvent::Enter << QCocoaWindow::s_windowUnderMouse->window()
-                           << QEvent::Leave << windowToLeave->window();
-        QWindowSystemInterface::handleEnterLeaveEvent(QCocoaWindow::s_windowUnderMouse->window(), windowToLeave->window(), windowPoint, screenPoint);
+        if (QCocoaWindow::s_windowUnderMouse) {
+            // Normal case: mouse moved from one window to another
+            qCInfo(lcQpaMouse) << "Detected new window under mouse at" << windowPoint << "; sending"
+                               << QEvent::Enter << QCocoaWindow::s_windowUnderMouse->window()
+                               << QEvent::Leave << windowToLeave->window();
+            QWindowSystemInterface::handleEnterLeaveEvent(QCocoaWindow::s_windowUnderMouse->window(), windowToLeave->window(), windowPoint, screenPoint);
+        } else {
+            // Mouse moved outside mask region - only send Leave event
+            qCInfo(lcQpaMouse) << "Mouse moved outside mask region at" << windowPoint << "; sending"
+                               << QEvent::Leave << windowToLeave->window();
+            QWindowSystemInterface::handleLeaveEvent(windowToLeave->window());
+        }
     }
 
     // Cocoa keeps firing mouse move events for obscured parent views. Qt should not
@@ -596,8 +618,21 @@ static const QPointingDevice *pointingDeviceFor(qint64 deviceID)
     QPointF windowPoint;
     QPointF screenPoint;
     [self convertFromScreen:[self screenMousePoint:theEvent] toWindowPoint:&windowPoint andScreenPoint:&screenPoint];
+    
+    // Check if mouse entered a masked (transparent) region
+    QRegion mask = QHighDpi::toNativeLocalPosition(m_platformWindow->window()->mask(), m_platformWindow->window());
+    const bool mouseInMaskedRegion = !mask.isEmpty() && !mask.contains(windowPoint.toPoint());
+    
+    if (mouseInMaskedRegion) {
+        // Mouse entered a transparent region - do not interfere with window tracking
+        qCDebug(lcQpaMouse) << "MASK TRANSPARENCY: Mouse entered masked region at" << windowPoint.toPoint() 
+                           << "- not participating in window tracking";
+        return; // Exit early, let underlying windows handle enter events
+    }
+    
+    // Mouse entered a visible region - normal behavior
     QWindow *childUnderMouse = m_platformWindow->childWindowAt(windowPoint.toPoint());
-    QCocoaWindow::s_windowUnderMouse = static_cast<QCocoaWindow *>(childUnderMouse->handle());
+    QCocoaWindow::s_windowUnderMouse = childUnderMouse ? static_cast<QCocoaWindow *>(childUnderMouse->handle()) : nullptr;
 
     if ([self isTransparentForUserInput])
         return;
@@ -605,9 +640,11 @@ static const QPointingDevice *pointingDeviceFor(qint64 deviceID)
     if (!NSApp.active)
         return;
 
-    qCInfo(lcQpaMouse) << "Mouse entered" << self << "at" << windowPoint << "with" << currentlyPressedMouseButtons()
-                       << "; sending" << QEvent::Enter << "to" << QCocoaWindow::s_windowUnderMouse->window();
-    QWindowSystemInterface::handleEnterEvent(QCocoaWindow::s_windowUnderMouse->window(), windowPoint, screenPoint);
+    if (QCocoaWindow::s_windowUnderMouse) {
+        qCInfo(lcQpaMouse) << "Mouse entered" << self << "at" << windowPoint << "with" << currentlyPressedMouseButtons()
+                           << "; sending" << QEvent::Enter << "to" << QCocoaWindow::s_windowUnderMouse->window();
+        QWindowSystemInterface::handleEnterEvent(QCocoaWindow::s_windowUnderMouse->window(), windowPoint, screenPoint);
+    }
 }
 
 - (void)mouseExitedImpl:(NSEvent *)theEvent

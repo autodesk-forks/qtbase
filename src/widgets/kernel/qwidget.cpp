@@ -1105,7 +1105,7 @@ QScreen *QWidgetPrivate::associatedScreen() const
 }
 
 // finds the first rhiconfig in the hierarchy that has enable==true
-static bool q_evaluateRhiConfigRecursive(const QWidget *w, QPlatformBackingStoreRhiConfig *outConfig, QSurface::SurfaceType *outType)
+static bool q_evaluateRhiConfigRecursive(const QWidget *w, QPlatformBackingStoreRhiConfig *outConfig, QSurface::SurfaceType *outType, QWidget** rhiWidget=nullptr)
 {
     QPlatformBackingStoreRhiConfig config = QWidgetPrivate::get(w)->rhiConfig();
     if (config.isEnabled()) {
@@ -1117,13 +1117,28 @@ static bool q_evaluateRhiConfigRecursive(const QWidget *w, QPlatformBackingStore
     }
     for (const QObject *child : w->children()) {
         if (const QWidget *childWidget = qobject_cast<const QWidget *>(child)) {
-            if (q_evaluateRhiConfigRecursive(childWidget, outConfig, outType)) {
-                static bool optOut = qEnvironmentVariableIsSet("QT_WIDGETS_NO_CHILD_RHI");
-                // Native child widgets should not trigger RHI for its parent
-                // hierarchy, but will still flush the native child using RHI.
-                if (!optOut && childWidget->testAttribute(Qt::WA_NativeWindow))
-                    continue;
+            if (q_evaluateRhiConfigRecursive(childWidget, outConfig, outType, rhiWidget)) {
+                // Autodesk Change:
+                // Retrieve the Rhi info of the child widget, so that we can add it to the tlw
+                // parent windows backing store.
+                if (rhiWidget) {
+                    if (*rhiWidget != nullptr) // already found a Rhi child
+                        return true;
 
+                    if (childWidget->testAttribute(Qt::WA_NativeWindow)) {
+                        if (childWidget->windowHandle()) {
+                            *rhiWidget = const_cast<QWidget *>(childWidget);
+                        } else
+                            continue;
+                    }
+                } else {
+                    static bool optOut = qEnvironmentVariableIsSet("QT_WIDGETS_NO_CHILD_RHI");
+                    // Native child widgets should not trigger RHI for its parent
+                    // hierarchy, but will still flush the native child using RHI.
+                    if (!optOut && childWidget->testAttribute(Qt::WA_NativeWindow)) {
+                        continue;
+                    }
+                }
                 return true;
             }
         }
@@ -1131,7 +1146,7 @@ static bool q_evaluateRhiConfigRecursive(const QWidget *w, QPlatformBackingStore
     return false;
 }
 
-bool q_evaluateRhiConfig(const QWidget *w, QPlatformBackingStoreRhiConfig *outConfig, QSurface::SurfaceType *outType)
+bool q_evaluateRhiConfig(const QWidget *w, QPlatformBackingStoreRhiConfig *outConfig, QSurface::SurfaceType *outType, QWidget** rhiWidget=nullptr)
 {
     // First, check env.vars. or other means that force the usage of rhi-based
     // flushing with a specific graphics API. This takes precedence over what
@@ -1144,7 +1159,7 @@ bool q_evaluateRhiConfig(const QWidget *w, QPlatformBackingStoreRhiConfig *outCo
 
     // Otherwise, check the widget hierarchy to see if there is a child (or
     // ourselves) that declare the need for rhi-based composition.
-    if (q_evaluateRhiConfigRecursive(w, outConfig, outType)) {
+    if (q_evaluateRhiConfigRecursive(w, outConfig, outType, rhiWidget)) {
         qCDebug(lcWidgetPainting) << "Tree with root" << w << "evaluates to flushing with QRhi";
         return true;
     }
@@ -1375,11 +1390,37 @@ void QWidgetPrivate::create()
             q->setBackingStore(new QBackingStore(win));
 
         QPlatformBackingStoreRhiConfig rhiConfig;
-        usesRhiFlush = q_evaluateRhiConfig(q, &rhiConfig, nullptr);
-        if (usesRhiFlush && q->backingStore()) {
+        // Autodesk Change:
+        // Ensure that if we have in the child hierarchy a rhi widget with WA_NativeWindow flag set,
+        // we add RHI support for it on the tlw backing store.
+        // Note that the original implementation of q_evaluateRhiConfigRecursive() RHI child widgets
+        // with WA_NativeWindow flag, this doesn't work when you e.g. undock / redock a dockwidget
+        // with a webview since with the old code the webengine's RHI support was initially added to
+        // another top level window, e.g. either to the backing store of the QMainWindow or the
+        // backing store of the floating QDockWidget. So we need to re-add it.
+        QWidget *rhiWidget = nullptr;
+        bool usesRhiFlushTemp = q_evaluateRhiConfig(q, &rhiConfig, nullptr, &rhiWidget);
+
+        // Autodesk Change:
+        // Enable the usesRhiFlush property on the right QWidget
+        if (rhiWidget)
+            rhiWidget->d_func()->usesRhiFlush = usesRhiFlushTemp;
+        else
+            usesRhiFlush = usesRhiFlushTemp;
+
+        if (usesRhiFlushTemp && q->backingStore()) {
+            // Autodesk Change:
+            // This ensures that an existing swapChain for our rhi widget gets properly
+            // released, otherwise we can run into swapChain crashes when e.g. a dockwidget
+            // with a webengine, which has the WA_NativeWindow flag set, gets undocked
+            // and tries to acquire a new swap chain.
+            if (rhiWidget)
+                qSendWindowChangeToTextureChildrenRecursively(rhiWidget,
+                                                              QEvent::WindowAboutToChangeInternal);
+
             // Trigger creation of support infrastructure up front,
             // now that we have a specific RHI configuration.
-            q->backingStore()->handle()->createRhi(win, rhiConfig);
+            q->backingStore()->handle()->createRhi(rhiWidget ? rhiWidget->windowHandle() : win, rhiConfig);
         }
     }
 
@@ -10601,6 +10642,16 @@ void QWidgetPrivate::setWindowFlags(Qt::WindowFlags flags)
         QPoint oldPos = q->pos();
         bool visible = q->isVisible();
         const bool windowFlagChanged = (q->data->window_flags ^ flags) & Qt::Window;
+
+        // Autodesk Change:
+        // Change from window to widget -> delete old backing store since we want to use the tlw
+        // parents one. This needs to be done when e.g. a floating dockwidget with a webengine, which
+        // has the WA_NativeWindow flag set, gets docked back into the mainwindow. Otherwise the
+        // wrong backing store is used for adding the child window's rhi config in QWidgetPrivate::create().
+        if ((q->data->window_flags & Qt::Window) && !(flags & Qt::Window)) {
+            q->setBackingStore(nullptr); // Checks for isWindow() internally, so we call it before the flags change.
+        }
+
         q->setParent(q->parentWidget(), flags);
 
         // if both types are windows or neither of them are, we restore

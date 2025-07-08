@@ -10949,7 +10949,15 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
                 // native parent to enable RHI flushing.
                 auto *existingWindow = newParentWithWindow->windowHandle();
                 auto existingSurfaceType = existingWindow->surfaceType();
-                if (existingSurfaceType != surfaceType) {
+                // Autodesk Change: Keep render surface type
+                // To avoid the automatic conversion of the TLW's surface type and 
+                // the connected destruction / recreation of the platform window, 
+                // when a RHI child widget gets added, we add support for a flag
+                // that can be set on the according TLW, which omits the surface 
+                // change behaviour and adds the RHI config to the native parent 
+                // widget's backing store instead.
+                static const bool keepSurface = qEnvironmentVariableIsSet("ADSK_QT_TLW_KEEP_SURFACE");
+                if (existingSurfaceType != surfaceType && !keepSurface) {
                     qCDebug(lcWidgetPainting)
                         << "Recreating" << existingWindow
                         << "with current type" << existingSurfaceType
@@ -10962,11 +10970,23 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
                     newParentWithWindow->windowHandle()->setWindowStates(windowStateBeforeDestroy);
                     QWidgetPrivate::get(newParentWithWindow)->setVisible(visibilityBeforeDestroy);
                 } else if (auto *backingStore = newParentWithWindow->backingStore()) {
-                    // If we don't recreate we still need to make sure the native parent
-                    // widget has a RHI config that the reparented widget can use.
-                    backingStore->handle()->createRhi(existingWindow, rhiConfig);
-                    // And that it knows it's now flushing with RHI
-                    QWidgetPrivate::get(newParentWithWindow)->usesRhiFlush = true;
+                    // Autodesk Change: Keep render surface type
+                    // Force the RHI widget to be native and add its RHI config
+                    // to the native parent widget's backing store
+                    if (keepSurface) {
+                        setAttribute(Qt::WA_NativeWindow);
+                        if (QWindow *forcedWin = windowHandle()) {
+                            // Add rhi config for proposed surface type
+                            backingStore->handle()->createRhi(forcedWin, rhiConfig);
+                            d->usesRhiFlush = true;
+                        }
+                    } else {
+                        // If we don't recreate we still need to make sure the native parent
+                        // widget has a RHI config that the reparented widget can use.
+                        backingStore->handle()->createRhi(existingWindow, rhiConfig);
+                        // And that it knows it's now flushing with RHI
+                        QWidgetPrivate::get(newParentWithWindow)->usesRhiFlush = true;
+                    }
                 }
             }
         }

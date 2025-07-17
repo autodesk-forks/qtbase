@@ -2986,6 +2986,10 @@ void QD3D11RenderBuffer::destroy()
     tex->Release();
     tex = nullptr;
 
+    // create() can fail in case of device lost.
+    // QD3D11TextureRenderTarget is out of date in case that create() returns early without increasing generation.
+    generation += 1; 
+
     QRHI_RES_RHI(QRhiD3D11);
     if (rhiD)
         rhiD->unregisterResource(this);
@@ -3113,6 +3117,11 @@ void QD3D11Texture::destroy()
     tex = nullptr;
     tex3D = nullptr;
     tex1D = nullptr;
+
+    // create() can fail in case of device lost.
+    // increase generation in case that create() returns earily
+    // QD3D11ShaderResourceBindings is out of date in case that create() returns early without increasing generation.
+    generation += 1;
 
     QRHI_RES_RHI(QRhiD3D11);
     if (rhiD)
@@ -3491,6 +3500,11 @@ void QD3D11Sampler::destroy()
     samplerState->Release();
     samplerState = nullptr;
 
+    // create() can fail in case of device lost.
+    // increase generation in case that create() returns earily
+    // QD3D11ShaderResourceBindings is out of date in case that create() returns early without increasing generation.
+    generation += 1;
+
     QRHI_RES_RHI(QRhiD3D11);
     if (rhiD)
         rhiD->unregisterResource(this);
@@ -3700,6 +3714,14 @@ void QD3D11TextureRenderTarget::destroy()
             rtv[i] = nullptr;
         }
     }
+
+    // create() can fail in case of device lost.
+    // d must be reset in case that create() returns early without populating d.
+    d.colorAttCount = 0;
+    d.dsAttCount = 0;
+    for (int i = 0; i < QD3D11RenderTargetData::MAX_COLOR_ATTACHMENTS; ++i)
+        d.rtv[i] = nullptr;
+    d.dsv = nullptr;
 
     QRHI_RES_RHI(QRhiD3D11);
     if (rhiD)

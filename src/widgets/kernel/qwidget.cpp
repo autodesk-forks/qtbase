@@ -2678,10 +2678,15 @@ void QWidgetPrivate::setStyle_helper(QStyle *newStyle, bool propagate)
 #endif
     extra->style = newStyle;
 
+    // TODO: fix for QTBUG-125513. will be removed when Qt have a better solution for the problem
+    if (auto pStyleSheetStyle = qt_styleSheet(newStyle)) {
+        pStyleSheetStyle->ref();
+    }
+
     // repolish
     if (polished && q->windowType() != Qt::Desktop) {
         oldStyle->unpolish(q);
-        q->style()->polish(q);
+        q->style()->polish(q);  // this call could lead to the destroy of newStyle !!!
     }
 
     if (propagate) {
@@ -2701,6 +2706,11 @@ void QWidgetPrivate::setStyle_helper(QStyle *newStyle, bool propagate)
         }
     }
 #endif
+
+    // TODO: fix for QTBUG-125513. will be removed when Qt have a better solution for the problem
+    if (auto pStyleSheetStyle = qt_styleSheet(newStyle)) {
+        pStyleSheetStyle->deref();
+    }
 
     QEvent e(QEvent::StyleChange);
     QCoreApplication::sendEvent(q, &e);

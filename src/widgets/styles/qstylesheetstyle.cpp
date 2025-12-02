@@ -2906,7 +2906,11 @@ bool QStyleSheetStyle::initObject(const QObject *obj) const
 
 void QStyleSheetStyle::polish(QWidget *w)
 {
-    baseStyle()->polish(w);
+    // TODO: fix for QTBUG-125513. will be removed when Qt have a better solution for the problem
+    this->ref();
+
+    baseStyle()->polish(w); // this call could lead to destroy of this style, and then crashed later
+                            // in this function
     RECURSION_GUARD(return)
 
     if (!initObject(w))
@@ -2924,6 +2928,9 @@ void QStyleSheetStyle::polish(QWidget *w)
     setProperties(w);
     unsetPalette(w);
     setPalette(w);
+
+    // TODO: fix for QTBUG-125513. will be removed when Qt have a better solution for the problem
+    this->deref();
 
     //set the WA_Hover attribute if one of the selector depends of the hover state
     QList<StyleRule> rules = styleRules(w);

@@ -1324,7 +1324,9 @@ bool QWindowsContext::windowsProc(HWND hwnd, UINT message,
     case QtWindows::TaskbarButtonCreated:
         // Apply application badge if this is the first time we have a taskbar
         // button, or after Explorer restart.
-        QWindowsIntegration::instance()->updateApplicationBadge();
+        if (QWindowsIntegration* integration = QWindowsIntegration::instance()) {
+            integration->updateApplicationBadge();
+        }
         break;
     default:
         break;

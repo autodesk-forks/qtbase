@@ -1425,7 +1425,7 @@ QRhi::FrameOpResult QRhiD3D11::endFrame(QRhiSwapChain *swapChain, QRhi::EndFrame
             return QRhi::FrameOpError;
         }
         HRESULT hr = swapChainD->swapChain->Present(swapChainD->swapInterval, presentFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in Present()");
             deviceLost = true;
             return QRhi::FrameOpDeviceLost;
@@ -5312,7 +5312,7 @@ bool QD3D11SwapChain::createOrResize()
         // flip model -> buffer count is the real buffer count, not 1 like with the legacy modes
         hr = swapChain->ResizeBuffers(UINT(BUFFER_COUNT), UINT(pixelSize.width()), UINT(pixelSize.height()),
                                       colorFormat, swapChainFlags);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
             qWarning("Device loss detected in ResizeBuffers()");
             rhiD->deviceLost = true;
             return false;

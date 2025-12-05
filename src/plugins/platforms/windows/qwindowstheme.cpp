@@ -587,7 +587,7 @@ Qt::ColorScheme QWindowsTheme::effectiveColorScheme()
         return s_colorSchemeOverride;
     if (s_colorScheme != Qt::ColorScheme::Unknown)
         return s_colorScheme;
-    if (!integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle))
+    if (integration && !integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle))
         return Qt::ColorScheme::Light;
     return queryColorScheme();
 }
@@ -605,15 +605,16 @@ void QWindowsTheme::handleSettingsChanged()
     const auto newColorScheme = effectiveColorScheme();
     const bool colorSchemeChanged = newColorScheme != oldColorScheme;
     s_colorScheme = newColorScheme;
-    auto integration = QWindowsIntegration::instance();
-    integration->updateApplicationBadge();
-    if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle)) {
-        QWindowsTheme::instance()->refresh();
-        QWindowSystemInterface::handleThemeChange<QWindowSystemInterface::SynchronousDelivery>();
-    }
-    if (colorSchemeChanged) {
-        for (QWindowsWindow *w : std::as_const(QWindowsContext::instance()->windows()))
-            w->setDarkBorder(s_colorScheme == Qt::ColorScheme::Dark);
+    if (auto integration = QWindowsIntegration::instance()) {
+        integration->updateApplicationBadge();
+        if (integration->darkModeHandling().testFlag(QWindowsApplication::DarkModeStyle)) {
+            QWindowsTheme::instance()->refresh();
+            QWindowSystemInterface::handleThemeChange<QWindowSystemInterface::SynchronousDelivery>();
+        }
+        if (colorSchemeChanged) {
+            for (QWindowsWindow *w : std::as_const(QWindowsContext::instance()->windows()))
+                w->setDarkBorder(s_colorScheme == Qt::ColorScheme::Dark);
+        }
     }
 }
 

@@ -491,6 +491,8 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
 
     if (!qt_window_private(window)->receivedExpose)
         return QPlatformBackingStore::FlushSuccess;
+    if (!swapchain)
+        return QPlatformBackingStore::FlushFailed;
 
     qCDebug(lcQpaBackingStore) << "Composing and flushing" << region << "of" << window
                                << "at offset" << offset << "with" << textures->count() << "texture(s) in" << textures
@@ -560,7 +562,7 @@ QPlatformBackingStore::FlushResult QBackingStoreDefaultCompositor::flush(QPlatfo
     const bool invertTargetY = !rhi->isYUpInNDC();
     const bool invertSource = !rhi->isYUpInFramebuffer();
 
-    if (m_texture) {
+    if (m_texture && m_widgetQuadData.isValid()) {
         // The backingstore is for the entire tlw. In case of native children, offset tells the position
         // relative to the tlw. The window rect is scaled by the source device pixel ratio to get
         // the source rect.

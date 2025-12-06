@@ -225,6 +225,8 @@ bool QRhiD3D11::create(QRhi::Flags flags)
     // targeting Windows 10+), but the option for using the old model is still
     // there. (some features are not supported then, however)
     useLegacySwapchainModel = qEnvironmentVariableIntValue("QT_D3D_NO_FLIP");
+    if (useLegacySwapchainModel)
+        supportsAllowTearing = false;
 
     if (!useLegacySwapchainModel) {
         if (qEnvironmentVariableIsSet("QT_D3D_MAX_FRAME_LATENCY"))

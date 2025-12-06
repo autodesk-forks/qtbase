@@ -1434,6 +1434,14 @@ QRhi::FrameOpResult QRhiD3D11::endFrame(QRhiSwapChain *swapChain, QRhi::EndFrame
         } else if (FAILED(hr)) {
             qWarning("Failed to present: %s",
                 qPrintable(QSystemError::windowsComString(hr)));
+            if (dev) {
+                hr = dev->GetDeviceRemovedReason();
+                if (hr == DXGI_ERROR_DEVICE_HUNG || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+                    qWarning("Device loss detected in Present() but Present() doesn't return device lost error");
+                    deviceLost = true;
+                    return QRhi::FrameOpDeviceLost;
+                }
+            }                
             return QRhi::FrameOpError;
         }
 

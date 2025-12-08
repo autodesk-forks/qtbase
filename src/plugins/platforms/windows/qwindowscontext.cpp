@@ -1249,9 +1249,13 @@ bool QWindowsContext::windowsProc(HWND hwnd, UINT message,
 #endif // QT_CONFIG(tabletevent)
         if (platformWindow->testFlag(QWindowsWindow::BlockedByModal))
             if (const QWindow *modalWindow = QGuiApplication::modalWindow()) {
-                QWindowsWindow *platformWindow = QWindowsWindow::windowsWindowOf(modalWindow);
-                Q_ASSERT(platformWindow);
-                platformWindow->alertWindow();
+                if (QWindowsWindow *platformWindow = QWindowsWindow::windowsWindowOf(modalWindow)) {
+                    Q_ASSERT(platformWindow);
+                    platformWindow->alertWindow();
+                }
+                else {
+                    qWarning() << "Modal window" << modalWindow << "has no platform window.";
+                }
             }
         break;
     case QtWindows::MouseActivateWindowEvent:

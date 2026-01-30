@@ -498,20 +498,64 @@ static bool addFontToDatabase(QString familyName,
     QString subFamilyStyle;
     // Look-up names registered in the font
     QFontNames canonicalNames = qt_getCanonicalFontNames(logFont);
+    
+    qCDebug(lcQpaFonts) << "Font registration: familyName=" << familyName 
+                       << "styleName=" << styleName
+                       << "canonicalName=" << canonicalNames.name
+                       << "preferredName=" << canonicalNames.preferredName
+                       << "preferredStyle=" << canonicalNames.preferredStyle;
+    
     if (qt_localizedName(familyName) && !canonicalNames.name.isEmpty())
         englishName = canonicalNames.name;
     if (!canonicalNames.preferredName.isEmpty()) {
-        subFamilyName = familyName;
-        subFamilyStyle = styleName;
-        faceName = familyName; // Remember the original name for later lookups
-        familyName = canonicalNames.preferredName;
-        // Preferred style / typographic subfamily name:
-        // "If it is absent, then name ID 2 is considered to be the typographic subfamily name."
-        // From: https://docs.microsoft.com/en-us/windows/win32/directwrite/opentype-variable-fonts
-        // Name ID 2 is already stored in the styleName variable. Furthermore, for variable fonts,
-        // styleName holds the variation instance name, which should be used over name ID 2.
-        if (!canonicalNames.preferredStyle.isEmpty())
-            styleName = canonicalNames.preferredStyle;
+        // GENERAL FIX: Prevent variant font mapping for all font families
+        // Don't use preferred family name if it would change a regular font request
+        // to a variant (narrow/condensed/extended) when the user didn't specifically request it
+        bool usePreferredName = true;
+        
+        // Define comprehensive list of font variant keywords
+        static const QStringList variantKeywords = {
+            "Narrow"_L1, "Condensed"_L1, "Extended"_L1, "Expanded"_L1, 
+            "Wide"_L1, "Compressed"_L1, "Semi Condensed"_L1, "Extra Condensed"_L1,
+            "Ultra Condensed"_L1, "Semi Extended"_L1, "Extra Extended"_L1,
+            "Ultra Extended"_L1, "Black"_L1, "Heavy"_L1, "Light Condensed"_L1,
+            "SemiLight Condensed"_L1, "SemiBold Condensed"_L1, "Bold Condensed"_L1
+        };
+        
+        // Check if preferred name contains variant indicators that weren't in the original request
+        for (const QString &keyword : variantKeywords) {
+            if (canonicalNames.preferredName.contains(keyword, Qt::CaseInsensitive) &&
+                !familyName.contains(keyword, Qt::CaseInsensitive)) {
+                qCDebug(lcQpaFonts) << "Preventing regular -> variant mapping for familyName:" 
+                                   << familyName << "preferredName:" << canonicalNames.preferredName 
+                                   << "variant:" << keyword;
+                usePreferredName = false;
+                break;
+            }
+        }
+        
+        if (usePreferredName) {
+            subFamilyName = familyName;
+            subFamilyStyle = styleName;
+            faceName = familyName; // Remember the original name for later lookups
+            familyName = canonicalNames.preferredName;
+            // Preferred style / typographic subfamily name:
+            // "If it is absent, then name ID 2 is considered to be the typographic subfamily name."
+            // From: https://docs.microsoft.com/en-us/windows/win32/directwrite/opentype-variable-fonts
+            // Name ID 2 is already stored in the styleName variable. Furthermore, for variable fonts,
+            // styleName holds the variation instance name, which should be used over name ID 2.
+            if (!canonicalNames.preferredStyle.isEmpty())
+                styleName = canonicalNames.preferredStyle;
+        } else {
+            // When we don't use preferred name, ensure we register the original family
+            // This is critical for ensuring regular fonts (like Arial Regular) get registered
+            // even when the canonical name processing suggests a variant family name
+            faceName = familyName; // Use the original family name for lookups
+            qCDebug(lcQpaFonts) << "Using original family name:" << familyName << "instead of preferred:" << canonicalNames.preferredName;
+        }
+    } else {
+        // No preferred name available, use original family name
+        faceName = familyName;
     }
 
     QSupportedWritingSystems writingSystems;
@@ -540,20 +584,77 @@ static bool addFontToDatabase(QString familyName,
     }
 
     const bool wasPopulated = QPlatformFontDatabase::isFamilyPopulated(familyName);
-    QPlatformFontDatabase::registerFont(familyName, styleName, foundryName, weight,
-                                        style, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+    
+    // GENERAL FIX: Prevent variant fonts from overwriting regular fonts for ANY font family
+    // Check if this is a variant font (Narrow, Condensed, Extended, etc.) trying to register 
+    // under a base family name, which could overwrite regular styles
+    
+    static const QStringList variantKeywords = {
+        "Narrow"_L1, "Condensed"_L1, "Extended"_L1, "Expanded"_L1, 
+        "Wide"_L1, "Compressed"_L1, "Semi Condensed"_L1, "Extra Condensed"_L1,
+        "Ultra Condensed"_L1, "Semi Extended"_L1, "Extra Extended"_L1,
+        "Ultra Extended"_L1, "Light Condensed"_L1, "SemiLight Condensed"_L1,
+        "SemiBold Condensed"_L1, "Bold Condensed"_L1
+    };
+    
+    bool skipVariantRegistration = false;
+    QString variantKeyword;
+    
+    // Check if styleName contains any variant keywords
+    for (const QString &keyword : variantKeywords) {
+        if (styleName.contains(keyword, Qt::CaseInsensitive)) {
+            // This is a variant font - check if the familyName is a base name without the variant
+            // For example: familyName="Arial", styleName="Narrow" should be redirected to "Arial Narrow" family
+            if (!familyName.contains(keyword, Qt::CaseInsensitive)) {
+                variantKeyword = keyword;
+                skipVariantRegistration = true;
+                break;
+            }
+        }
+    }
+    
+    if (skipVariantRegistration) {
+        qCDebug(lcQpaFonts) << "BLOCKING variant font from overwriting regular font. familyName=" 
+                           << familyName << "styleName=" << styleName 
+                           << "variant=" << variantKeyword << "- redirecting to variant family";
+        
+        // Create variant family name by combining base family + variant keyword
+        QString variantFamilyName = familyName + " " + variantKeyword;
+        
+        // Clean up the style name by removing the variant keyword
+        QString cleanStyleName = styleName;
+        cleanStyleName = cleanStyleName.replace(variantKeyword + " "_L1, ""_L1)
+                                       .replace(variantKeyword, "Regular"_L1);
+        if (cleanStyleName.isEmpty()) {
+            cleanStyleName = "Regular"_L1;
+        }
+        
+        qCDebug(lcQpaFonts) << "Registering variant font: familyName=" << variantFamilyName 
+                           << "styleName=" << cleanStyleName;
+        
+        // Register under variant family instead
+        QPlatformFontDatabase::registerFont(variantFamilyName, cleanStyleName, foundryName, weight,
+                                            style, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+    } else {
+        // Regular font - register normally
+        QPlatformFontDatabase::registerFont(familyName, styleName, foundryName, weight,
+                                            style, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+    }
 
 
     // add fonts windows can generate for us:
-    if (weight <= QFont::DemiBold && styleName.isEmpty())
-        QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, QFont::Bold,
-                                            style, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
-    if (style != QFont::StyleItalic && styleName.isEmpty())
-        QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, weight,
-                                            QFont::StyleItalic, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
-    if (weight <= QFont::DemiBold && style != QFont::StyleItalic && styleName.isEmpty())
-        QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, QFont::Bold,
-                                            QFont::StyleItalic, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+    // Don't generate synthetic styles for variant fonts that we've redirected
+    if (!skipVariantRegistration) {
+        if (weight <= QFont::DemiBold && styleName.isEmpty())
+            QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, QFont::Bold,
+                                                style, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+        if (style != QFont::StyleItalic && styleName.isEmpty())
+            QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, weight,
+                                                QFont::StyleItalic, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+        if (weight <= QFont::DemiBold && style != QFont::StyleItalic && styleName.isEmpty())
+            QPlatformFontDatabase::registerFont(familyName, QString(), foundryName, QFont::Bold,
+                                                QFont::StyleItalic, stretch, antialias, scalable, size, fixed, writingSystems, new QWindowsFontDatabase::FontHandle(faceName));
+    }
 
     // We came here from populating a different font family, so we have
     // to ensure the entire typographic family is populated before we
@@ -582,6 +683,9 @@ static int QT_WIN_CALLBACK storeFont(const LOGFONT *logFont, const TEXTMETRIC *t
     const ENUMLOGFONTEX *f = reinterpret_cast<const ENUMLOGFONTEX *>(logFont);
     const QString familyName = QString::fromWCharArray(f->elfLogFont.lfFaceName);
     const QString styleName = QString::fromWCharArray(f->elfStyle);
+
+    qCDebug(lcQpaFonts) << "storeFont callback: familyName=" << familyName 
+                       << "styleName=" << styleName << "type=" << type;
 
     // NEWTEXTMETRICEX (passed for TT fonts) is a NEWTEXTMETRIC, which according
     // to the documentation is identical to a TEXTMETRIC except for the last four
@@ -619,7 +723,7 @@ bool QWindowsFontDatabase::populateFamilyAliases(const QString &missingFamily)
 
 void QWindowsFontDatabase::populateFamily(const QString &familyName)
 {
-    qCDebug(lcQpaFonts) << familyName;
+    qCDebug(lcQpaFonts) << "populateFamily:" << familyName;
     if (familyName.size() >= LF_FACESIZE) { // Field length of LOGFONT::lfFaceName
         qCDebug(lcQpaFonts) << "Unable to enumerate family '" << familyName << '\'';
         return;
@@ -631,7 +735,9 @@ void QWindowsFontDatabase::populateFamily(const QString &familyName)
     lf.lfFaceName[familyName.size()] = 0;
     lf.lfPitchAndFamily = 0;
     StoreFontPayload sfp(familyName, this);
+    
     EnumFontFamiliesEx(dummy, &lf, storeFont, reinterpret_cast<intptr_t>(&sfp), 0);
+    
     ReleaseDC(0, dummy);
 }
 

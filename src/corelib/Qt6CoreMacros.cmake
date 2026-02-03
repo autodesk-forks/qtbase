@@ -1644,13 +1644,14 @@ function(_qt_internal_generate_win32_rc_file target)
 
         set(product_version "")
         if (target_version)
-            if(target_version MATCHES "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+")
-                # nothing to do
-            elseif(target_version MATCHES "[0-9]+\\.[0-9]+\\.[0-9]+")
+            # Use anchored regex (^...$) to match the entire string, not just a substring
+            if(target_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$")
+                # Already 4 parts, nothing to do
+            elseif(target_version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
                 set(target_version "${target_version}.0")
-            elseif(target_version MATCHES "[0-9]+\\.[0-9]+")
+            elseif(target_version MATCHES "^[0-9]+\\.[0-9]+$")
                 set(target_version "${target_version}.0.0")
-            elseif (target_version MATCHES "[0-9]+")
+            elseif (target_version MATCHES "^[0-9]+$")
                 set(target_version "${target_version}.0.0.0")
             else()
                 message(FATAL_ERROR "Invalid version format: '${target_version}'")

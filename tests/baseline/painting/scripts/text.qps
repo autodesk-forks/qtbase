@@ -196,9 +196,4 @@ save
     drawText 0 20 "All the effects text drawing"
 restore
 
-translate 0 35.5
-save
-    setPen black
-    setFont "Arial Black" 12 normal
-    drawText 0 20 "Foobar"
-restore
+

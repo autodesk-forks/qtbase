@@ -200,12 +200,21 @@ function(qt_internal_add_3rdparty_library target)
 
     qt_skip_warnings_are_errors_when_repo_unclean("${target}")
 
+    # Use QT_BINARY_VERSION if set (for custom binary versioning), otherwise use PROJECT_VERSION
+    if(DEFINED QT_BINARY_VERSION)
+        set(_lib_version ${QT_BINARY_VERSION})
+        set(_lib_soversion ${QT_BINARY_VERSION_MAJOR})
+    else()
+        set(_lib_version ${PROJECT_VERSION})
+        set(_lib_soversion ${PROJECT_VERSION_MAJOR})
+    endif()
+
     set_target_properties(${target} PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${QT_BUILD_DIR}/${INSTALL_LIBDIR}"
         RUNTIME_OUTPUT_DIRECTORY "${QT_BUILD_DIR}/${INSTALL_BINDIR}"
         ARCHIVE_OUTPUT_DIRECTORY "${QT_BUILD_DIR}/${INSTALL_LIBDIR}"
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR}
+        VERSION ${_lib_version}
+        SOVERSION ${_lib_soversion}
         _qt_module_skip_depends_include TRUE
     )
     set_property(TARGET "${target}"

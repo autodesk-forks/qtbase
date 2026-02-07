@@ -346,9 +346,16 @@ function(qt_internal_add_module target)
     if((UIKIT OR WASM) AND BUILD_SHARED_LIBS)
         set(version_args "")
     else()
-        set(version_args
-            VERSION ${PROJECT_VERSION}
-            SOVERSION ${PROJECT_VERSION_MAJOR})
+        # Use QT_BINARY_VERSION if set (for custom binary versioning), otherwise use PROJECT_VERSION
+        if(DEFINED QT_BINARY_VERSION)
+            set(version_args
+                VERSION ${QT_BINARY_VERSION}
+                SOVERSION ${QT_BINARY_VERSION_MAJOR})
+        else()
+            set(version_args
+                VERSION ${PROJECT_VERSION}
+                SOVERSION ${PROJECT_VERSION_MAJOR})
+        endif()
     endif()
 
     if(NOT arg_HEADER_MODULE)

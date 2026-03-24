@@ -11129,11 +11129,23 @@ void QWidget::setParent(QWidget *parent, Qt::WindowFlags f)
                     newParentWithWindow->windowHandle()->setWindowStates(windowStateBeforeDestroy);
                     QWidgetPrivate::get(newParentWithWindow)->setVisible(visibilityBeforeDestroy);
                 } else if (auto *backingStore = newParentWithWindow->backingStore()) {
-                    // If we don't recreate we still need to make sure the native parent
-                    // widget has a RHI config that the reparented widget can use.
-                    backingStore->handle()->createRhi(existingWindow, rhiConfig);
-                    // And that it knows it's now flushing with RHI
-                    QWidgetPrivate::get(newParentWithWindow)->usesRhiFlush = true;
+                    // Autodesk Change: Keep render surface type
+                    // Force the RHI widget to be native and add its RHI config
+                    // to the native parent widget's backing store
+                    if (keepSurface) {
+                        setAttribute(Qt::WA_NativeWindow);
+                        if (QWindow *forcedWin = windowHandle()) {
+                            // Add rhi config for proposed surface type
+                            backingStore->handle()->createRhi(forcedWin, rhiConfig);
+                            d->usesRhiFlush = true;
+                        }
+                    } else {
+                        // If we don't recreate we still need to make sure the native parent
+                        // widget has a RHI config that the reparented widget can use.
+                        backingStore->handle()->createRhi(existingWindow, rhiConfig);
+                        // And that it knows it's now flushing with RHI
+                        QWidgetPrivate::get(newParentWithWindow)->usesRhiFlush = true;
+                    }
                 }
             }
         }

@@ -84,6 +84,8 @@
 #include "qdrawutil.h"
 
 #include <limits.h>
+#include <memory>
+#include <QtCore/qmetaobject.h>
 #if QT_CONFIG(toolbar)
 #include <QtWidgets/qtoolbar.h>
 #endif
@@ -3124,29 +3126,63 @@ void QStyleSheetStyle::drawComplexControl(ComplexControl cc, const QStyleOptionC
 #if QT_CONFIG(spinbox)
     case CC_SpinBox:
         if (const QStyleOptionSpinBox *spin = qstyleoption_cast<const QStyleOptionSpinBox *>(opt)) {
-            QStyleOptionSpinBox spinOpt(*spin);
-            rule.configurePalette(&spinOpt.palette, QPalette::ButtonText, QPalette::Button);
-            rule.configurePalette(&spinOpt.palette, QPalette::Text, QPalette::Base);
-            spinOpt.rect = rule.borderRect(opt->rect);
+            //------------------------------------------------------------------
+            // Autodesk 3ds Max addition: Since 3ds Max uses a derived version
+            // of QStyleOptionSpinBox to accomplish the use of the animation key
+            // brackets, we need to clone this option in a special manner, the
+            // previous "spinOpt = QStyleOptionSpinBox( *spin );" doesn't work.
+            // To allow that, we invoke a method called "cloneStyleOption" on
+            // the baseStyle(), if available - or we just fall back into the old
+            // behavior.
+            //------------------------------------------------------------------
+            std::unique_ptr<QStyleOptionSpinBox> spinOpt;
+            if ( opt->version == 2 )
+            {
+                if ( auto b = baseStyle() )
+                {
+                    QStyleOption* clone = nullptr;
+                    if ( QMetaObject::invokeMethod( b, "cloneStyleOption", Qt::DirectConnection, 
+                        Q_RETURN_ARG( QStyleOption*, clone ), 
+                        Q_ARG( const QStyleOption*, opt ) ) )
+                    {
+                        if ( auto clone_cast = qstyleoption_cast<QStyleOptionSpinBox*>( clone ) )
+                        {
+                            spinOpt.reset( clone_cast );
+                        }
+                        else
+                        {
+                            delete clone;
+                        }
+                    }
+                }
+            }
+            if ( !spinOpt )
+            {
+                spinOpt.reset( new QStyleOptionSpinBox( *spin ) );
+            }
+            
+            rule.configurePalette(&spinOpt->palette, QPalette::ButtonText, QPalette::Button);
+            rule.configurePalette(&spinOpt->palette, QPalette::Text, QPalette::Base);
+            spinOpt->rect = rule.borderRect(opt->rect);
             bool customUp = true, customDown = true;
             QRenderRule upRule = renderRule(w, opt, PseudoElement_SpinBoxUpButton);
             QRenderRule downRule = renderRule(w, opt, PseudoElement_SpinBoxDownButton);
             bool upRuleMatch = upRule.hasGeometry() || upRule.hasPosition();
             bool downRuleMatch = downRule.hasGeometry() || downRule.hasPosition();
             if (rule.hasNativeBorder() && !upRuleMatch && !downRuleMatch) {
-                rule.drawBackgroundImage(p, spinOpt.rect);
+                rule.drawBackgroundImage(p, spinOpt->rect);
                 customUp = (opt->subControls & QStyle::SC_SpinBoxUp)
                         && (hasStyleRule(w, PseudoElement_SpinBoxUpButton) || hasStyleRule(w, PseudoElement_UpArrow));
                 if (customUp)
-                    spinOpt.subControls &= ~QStyle::SC_SpinBoxUp;
+                    spinOpt->subControls &= ~QStyle::SC_SpinBoxUp;
                 customDown = (opt->subControls & QStyle::SC_SpinBoxDown)
                         && (hasStyleRule(w, PseudoElement_SpinBoxDownButton) || hasStyleRule(w, PseudoElement_DownArrow));
                 if (customDown)
-                    spinOpt.subControls &= ~QStyle::SC_SpinBoxDown;
+                    spinOpt->subControls &= ~QStyle::SC_SpinBoxDown;
                 if (rule.baseStyleCanDraw()) {
-                    baseStyle()->drawComplexControl(cc, &spinOpt, p, w);
+                    baseStyle()->drawComplexControl(cc, spinOpt.get(), p, w);
                 } else {
-                    QWindowsStyle::drawComplexControl(cc, &spinOpt, p, w);
+                    QWindowsStyle::drawComplexControl(cc, spinOpt.get(), p, w);
                 }
                 if (!customUp && !customDown)
                     return;
@@ -3163,8 +3199,8 @@ void QStyleSheetStyle::drawComplexControl(ComplexControl cc, const QStyleOptionC
                     r = positionRect(w, subRule, subRule2, PseudoElement_SpinBoxUpArrow, r, opt->direction);
                     subRule2.drawRule(p, r);
                 } else {
-                    spinOpt.subControls = QStyle::SC_SpinBoxUp;
-                    QWindowsStyle::drawComplexControl(cc, &spinOpt, p, w);
+                    spinOpt->subControls = QStyle::SC_SpinBoxUp;
+                    QWindowsStyle::drawComplexControl(cc, spinOpt.get(), p, w);
                 }
             }
 
@@ -3177,8 +3213,8 @@ void QStyleSheetStyle::drawComplexControl(ComplexControl cc, const QStyleOptionC
                     r = positionRect(w, subRule, subRule2, PseudoElement_SpinBoxDownArrow, r, opt->direction);
                     subRule2.drawRule(p, r);
                 } else {
-                    spinOpt.subControls = QStyle::SC_SpinBoxDown;
-                    QWindowsStyle::drawComplexControl(cc, &spinOpt, p, w);
+                    spinOpt->subControls = QStyle::SC_SpinBoxDown;
+                    QWindowsStyle::drawComplexControl(cc, spinOpt.get(), p, w);
                 }
             }
             return;

@@ -34,6 +34,7 @@ class Q_WIDGETS_EXPORT QTabBar: public QWidget
     Q_PROPERTY(bool documentMode READ documentMode WRITE setDocumentMode)
     Q_PROPERTY(bool autoHide READ autoHide WRITE setAutoHide)
     Q_PROPERTY(bool changeCurrentOnDrag READ changeCurrentOnDrag WRITE setChangeCurrentOnDrag)
+    Q_PROPERTY(bool multiRow READ multiRow WRITE setMultiRow)
 
 public:
     explicit QTabBar(QWidget *parent = nullptr);
@@ -106,6 +107,10 @@ public:
 
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
+    int heightForWidth( int width ) const override;
+    bool hasHeightForWidth() const override;
+
+    int widthForHeight(int height) const;
 
     void setDrawBase(bool drawTheBase);
     bool drawBase() const;
@@ -139,6 +144,9 @@ public:
 
     bool changeCurrentOnDrag() const;
     void setChangeCurrentOnDrag(bool change);
+
+    bool multiRow() const;
+    void setMultiRow(bool multiRow);
 
 #if QT_CONFIG(accessibility)
     QString accessibleTabName(int index) const;

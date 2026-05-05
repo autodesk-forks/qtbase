@@ -65,6 +65,7 @@ private:
     // HLG from linear [0-12] -> [0-1]
     static float hlgFromLinear(float x)
     {
+        x = std::clamp(x, 0.f, 12.f);
         if (x > 1.f)
             return m_hlg_a * std::log(x - m_hlg_b) + m_hlg_c;
         return std::sqrt(x * 0.25f);
@@ -73,6 +74,7 @@ private:
     // HLG to linear [0-1] -> [0-12]
     static float hlgToLinear(float x)
     {
+        x = std::clamp(x, 0.f, 1.f);
         if (x < 0.5f)
             return (x * x) * 4.f;
         return std::exp((x - m_hlg_c) / m_hlg_a) + m_hlg_b;
@@ -85,6 +87,7 @@ private:
     // PQ to linear [0-1] -> [0-64]
     static float pqToLinear(float x)
     {
+        x = std::clamp(x, 0.f, 1.f);
         x = std::pow(x, 1.f / m_pq_m2);
         return std::pow((m_pq_c1 - x) / (m_pq_c3 * x - m_pq_c2), (1.f / m_pq_m1)) * m_pq_f;
     }
@@ -92,6 +95,7 @@ private:
     // PQ from linear [0-64] -> [0-1]
     static float pqFromLinear(float x)
     {
+        x = std::clamp(x, 0.f, 64.f);
         x = std::pow(x * (1.f / m_pq_f), m_pq_m1);
         return std::pow((m_pq_c1 + m_pq_c2 * x) / (1.f + m_pq_c3 * x), m_pq_m2);
     }
